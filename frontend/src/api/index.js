@@ -90,6 +90,17 @@ export const doctorsApi = {
       console.error(`Error fetching doctor with ID ${doctorId}:`, error);
       throw error;
     }
+  },
+  
+  // Получение списка специализаций
+  getSpecializations: async () => {
+    try {
+      const response = await api.get('/api/specializations');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching specializations:', error);
+      throw error;
+    }
   }
 };
 
@@ -128,6 +139,17 @@ export const notificationsApi = {
     } catch (error) {
       console.error(`Error marking notification ${notificationId} as read:`, error);
       throw error;
+    }
+  },
+  
+  // Отметка уведомления о заявке как просмотренного
+  markAsViewed: async (applicationId) => {
+    try {
+      await api.post('/users/me/notifications/viewed', { application_id: applicationId });
+      return true; // Успешно
+    } catch (error) {
+      console.error(`Ошибка при отметке уведомления о заявке ${applicationId} как просмотренного:`, error);
+      return false; // Ошибка
     }
   }
 };

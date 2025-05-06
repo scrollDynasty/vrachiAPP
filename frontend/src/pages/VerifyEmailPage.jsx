@@ -127,7 +127,7 @@ const VerifyEmailPage = () => {
             setResendSuccess(false);
           }, 5000);
         }
-      } catch (error) {
+          } catch (error) {
         console.error('Ошибка при запросе новой ссылки подтверждения:', error);
         setError('Не удалось отправить новую ссылку. Пожалуйста, попробуйте позже.');
       } finally {
@@ -375,9 +375,9 @@ const VerifyEmailPage = () => {
                 {resendError && (
                   <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200">
                     <p>{resendError}</p>
-                  </div>
-                )}
-                
+         </div>
+      )}
+
                 <div className="flex flex-col gap-3">
                   <Input
                     label="Ваш Email"

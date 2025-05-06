@@ -42,6 +42,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False) # Хэш пароля
     is_active = Column(Boolean, default=False) # <--- ИЗМЕНЕНО: Пользователь неактивен по умолчанию после регистрации
     role = Column(String(50), nullable=False) # Роль пользователя ('patient', 'doctor', 'admin')
+    auth_provider = Column(String(50), default="email") # Провайдер аутентификации ('email', 'google')
 
     # Поля для подтверждения email
     email_verification_token = Column(String(255), unique=True, nullable=True) # Токен подтверждения email (может быть NULL)
@@ -56,6 +57,9 @@ class User(Base):
 
     # Отношение к заявкам на роль врача
     doctor_applications = relationship("DoctorApplication", back_populates="user")
+    
+    # Отношение к просмотренным уведомлениям
+    viewed_notifications = relationship("ViewedNotification", back_populates="user")
 
 
 # Модель профиля Пациента
@@ -136,10 +140,87 @@ class DoctorApplication(Base):
     user = relationship("User", back_populates="doctor_applications")
 
 
+# Модель для хранения информации о просмотренных уведомлениях
+class ViewedNotification(Base):
+    __tablename__ = "viewed_notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    application_id = Column(Integer, ForeignKey("doctor_applications.id", ondelete="CASCADE"), nullable=False)
+    viewed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Отношения
+    user = relationship("User", back_populates="viewed_notifications")
+    application = relationship("DoctorApplication")
+
+
+# Модель для консультаций между пациентом и врачом
+class Consultation(Base):
+    __tablename__ = "consultations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    doctor_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    # Статус консультации
+    status = Column(String(50), default="pending") # pending, active, completed, cancelled
+    
+    # Даты создания и завершения
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True) # Когда начата
+    completed_at = Column(DateTime, nullable=True) # Когда завершена
+    
+    # Лимит времени для чата (в минутах)
+    chat_time_limit = Column(Integer, default=5) # 5 минут по умолчанию
+    
+    # Отношения
+    patient = relationship("User", foreign_keys=[patient_id])
+    doctor = relationship("User", foreign_keys=[doctor_id])
+    messages = relationship("Message", back_populates="consultation", cascade="all, delete-orphan")
+    review = relationship("Review", back_populates="consultation", uselist=False)
+
+
+# Модель для сообщений в чате
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    consultation_id = Column(Integer, ForeignKey("consultations.id", ondelete="CASCADE"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    # Текст сообщения
+    content = Column(Text, nullable=False)
+    
+    # Дата отправки
+    sent_at = Column(DateTime, default=datetime.utcnow)
+    is_read = Column(Boolean, default=False) # Прочитано ли сообщение
+    
+    # Отношения
+    consultation = relationship("Consultation", back_populates="messages")
+    sender = relationship("User")
+
+
+# Модель для отзывов о консультации
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    consultation_id = Column(Integer, ForeignKey("consultations.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # Оценка (от 1 до 5)
+    rating = Column(Integer, nullable=False)
+    
+    # Текст отзыва
+    comment = Column(Text, nullable=True)
+    
+    # Дата создания
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Отношения
+    consultation = relationship("Consultation", back_populates="review")
+
+
 # TODO: Определить модели для других сущностей:
-# class Consultation(Base): ...
-# class Message(Base): ...
-# class Review(Base): ...
 
 
 # --- Вспомогательная функция для получения сессии ---

@@ -9,7 +9,7 @@ import LoginForm from '../components/LoginForm';
 import RegisterForm from '../components/RegisterForm';
 
 // Импортируем компоненты NextUI
-import { Card, CardBody, CardHeader, Avatar, Divider } from '@nextui-org/react';
+import { Card, CardBody, CardHeader, Avatar, Divider, Button, Tooltip } from '@nextui-org/react';
 // Импортируем иконки
 import { LockIcon, UserPlusIcon } from './AuthIcons';
 
@@ -58,7 +58,7 @@ function AuthPage() {
   // Эффект для перенаправления пользователя на главную страницу после успешной авторизации
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      console.log("AuthPage: User authenticated, redirecting to home.");
+       console.log("AuthPage: User authenticated, redirecting to home.");
       navigate('/'); 
     }
   }, [isAuthenticated, isAuthLoading, navigate]);
@@ -67,6 +67,9 @@ function AuthPage() {
   useEffect(() => {
     useAuthStore.setState({ error: null });
   }, [location.pathname]);
+
+  // Проверяем, есть ли ошибка, связанная с Google Auth
+  const isGoogleAuthError = authError && authError.includes("registered with Google");
 
   // Обработчик входа через Google
   const handleGoogleLogin = () => {
@@ -203,10 +206,23 @@ function AuthPage() {
               </div>
             )}
 
+            {/* Сообщение о Google Auth, если есть ошибка связанная с Google */}
+            {isGoogleAuthError && (
+              <div className="bg-blue-50 text-blue-800 p-4 rounded-xl mb-6 shadow-sm border border-blue-200">
+                <div className="flex items-center mb-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="font-medium">Вход через Google</p>
+                </div>
+                <p className="text-sm pl-7">Если вы зарегистрировались через Google, пожалуйста, используйте кнопку "Войти через Google" ниже.</p>
+              </div>
+            )}
+
             {/* Вход через Google */}
             <div className="flex justify-center mb-6">
               <button 
-                className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50 transition-all"
+                className={`w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border ${isGoogleAuthError ? 'border-blue-300 bg-blue-50 shadow-md ring-2 ring-blue-200' : 'border-gray-300'} rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50 transition-all`}
                 onClick={handleGoogleLogin}
                 disabled={isFormLoading || formTransition}
               >
@@ -226,19 +242,36 @@ function AuthPage() {
               <Divider className="flex-1" />
             </div>
 
+            {/* Подсказка о том, что если пользователь зарегистрирован через Google, нужно использовать Google для входа */}
+            <Tooltip 
+              content="Если вы зарегистрировались через Google, используйте кнопку 'Войти через Google' выше"
+              placement="bottom"
+              color="primary"
+              className="mb-4"
+            >
+              <div className="text-xs text-center text-gray-500 mb-4 cursor-help">
+                <span className="flex items-center justify-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Уже зарегистрированы через Google?
+                </span>
+              </div>
+            </Tooltip>
+
             {/* Условное отображение формы в зависимости от активной вкладки */}
             <div className="transition-all duration-300 min-h-[360px]">
               <div className={`transform transition-all duration-300 ${formTransition ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
                 {currentTab === 'login' && (
                   <div className="animate-fade-in">
-                    <LoginForm onSubmit={login} isLoading={isFormLoading} error={authError} />
+                <LoginForm onSubmit={login} isLoading={isFormLoading} error={authError} />
                   </div>
-                )}
+            )}
                 {currentTab === 'register' && (
                   <div className="animate-fade-in">
-                    <RegisterForm onSubmit={registerUser} isLoading={isFormLoading} error={authError} />
+                <RegisterForm onSubmit={registerUser} isLoading={isFormLoading} error={authError} />
                   </div>
-                )}
+            )}
               </div>
             </div>
 

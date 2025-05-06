@@ -46,7 +46,7 @@ function HomePage() {
                 <Button 
                   color="secondary" 
                   className="mt-auto bg-gradient-to-r from-purple-600 to-indigo-600 text-white"
-                  onClick={() => navigate('/admin')}
+                  onPress={() => navigate('/admin')}
                 >
                   Перейти в админ-панель
                 </Button>
@@ -61,7 +61,7 @@ function HomePage() {
                 <Button 
                   color="secondary" 
                   className="mt-auto"
-                  onClick={() => alert('Функционал в разработке')}
+                  onPress={() => alert('Функционал в разработке')}
                 >
                   В разработке
                 </Button>
@@ -137,13 +137,13 @@ function HomePage() {
   
   // Выбираем набор карточек в зависимости от роли
   const serviceCards = user?.role === 'doctor' ? doctorCards : patientCards;
-  
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       <div className="max-w-screen-xl mx-auto px-4 py-12">
         {/* Компонент уведомлений о статусе заявок */}
         <ApplicationStatusTracker />
-        
+
         {/* Приветствие */}
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">{welcomeText}</h1>
@@ -177,7 +177,7 @@ function HomePage() {
                         size="sm" 
                         color="warning" 
                         variant="flat"
-                        onClick={() => navigate('/verify-email')}
+                        onPress={() => navigate('/verify-email')}
                       >
                         Подробнее
                       </Button>
@@ -185,7 +185,7 @@ function HomePage() {
                         size="sm"
                         color="default"
                         variant="light"
-                        onClick={() => window.location.href = 'mailto:support@example.com'}
+                        onPress={() => window.location.href = 'mailto:support@example.com'}
                       >
                         Возникли проблемы?
                       </Button>
@@ -208,7 +208,7 @@ function HomePage() {
                 <Button 
                   color="primary" 
                   className="mt-auto"
-                  onClick={card.action}
+                  onPress={card.action}
                 >
                   Перейти
                 </Button>
@@ -221,12 +221,12 @@ function HomePage() {
         <Card className="mt-12 bg-blue-50">
           <CardBody className="p-6">
             <div className="flex items-center justify-between">
-              <div>
+        <div>
                 <h3 className="text-lg font-semibold text-gray-800">Статус платформы</h3>
                 <p className="text-gray-600">Все системы работают в штатном режиме</p>
               </div>
               <div className="bg-success rounded-full w-3 h-3"></div>
-            </div>
+           </div>
           </CardBody>
         </Card>
         

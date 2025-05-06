@@ -465,7 +465,7 @@ const useAuthStore = create((set, get) => ({ // Добавляем 'get' для 
       }
       
       return false;
-    }
+     }
   }
 }));
 

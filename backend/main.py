@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles # Для раздачи статич
 import secrets
 
 # Импортируем наши модели и функцию для получения сессии БД
-from models import User, PatientProfile, DoctorProfile, get_db, DATABASE_URL, engine, Base, DoctorApplication, SessionLocal # Добавляем SessionLocal
+from models import User, PatientProfile, DoctorProfile, get_db, DATABASE_URL, engine, Base, DoctorApplication, SessionLocal, ViewedNotification, Consultation, Message, Review # Добавляем новые модели
 # Импортируем функции для работы с паролями и JWT, а также зависимости для аутентификации и ролей
 # get_current_user и require_role используются как зависимости в эндпоинтах
 from auth import get_password_hash, verify_password, create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, require_role, authenticate_user, get_current_active_user, SECURE_TOKEN_LENGTH, Token as TokenModel, verify_google_token, authenticate_google_user
@@ -29,9 +29,6 @@ from schemas import UserCreate, UserResponse, Token, PatientProfileCreateUpdate,
 
 # Для загрузки .env файла (важно вызвать где-то в начале приложения, лучше в auth.py)
 from dotenv import load_dotenv
-# Убедимся, что load_dotenv() вызывается где-то перед использованием переменных окружения.
-# В данном случае он вызывается и в models.py и в auth.py.
-# Можно вызвать явно здесь, если уверены, что он не вызывается в импортируемых модулях:
 load_dotenv()
 
 # Создаем директорию для загрузки файлов, если она еще не существует
@@ -130,102 +127,70 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 # --- Функция для отправки письма с помощью SMTP ---
 def send_verification_email(email: str, token: str):
     """
-    Функция для отправки письма с подтверждением email через SMTP.
+    Отправляет email с ссылкой для подтверждения почты.
     
     Args:
-        email (str): Email пользователя.
-        token (str): Токен подтверждения email.
+        email (str): Email пользователя
+        token (str): Токен для подтверждения
+        
+    Note:
+        В продакшене данная функция должна использовать реальный SMTP сервер.
     """
-    # Формируем полную ссылку для подтверждения email
+    # Формируем ссылку для подтверждения
     verification_link = f"{VERIFICATION_BASE_URL}?token={token}"
     
-    # Создаем объект для составного сообщения (HTML + текст)
-    message = MIMEMultipart("alternative")
-    message["Subject"] = "Подтверждение email для платформы онлайн-консультаций с врачами"
-    message["From"] = EMAIL_FROM
-    message["To"] = email
-    
-    # Создаем простой текстовый вариант письма
-    text = f"""
-    Здравствуйте!
-    
-    Спасибо за регистрацию на платформе онлайн-консультаций с врачами.
-    Для подтверждения вашего email, пожалуйста, перейдите по следующей ссылке:
-    
-    {verification_link}
-    
-    Если вы не регистрировались на нашем сайте, просто проигнорируйте это письмо.
-    
-    С уважением,
-    Команда платформы онлайн-консультаций с врачами
-    """
-    
-    # Создаем HTML версию письма (с красивым форматированием)
-    html = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background-color: #1976d2; color: white; padding: 20px; text-align: center; }}
-            .content {{ padding: 20px; }}
-            .button {{ display: inline-block; background-color: #1976d2; color: white; 
-                      padding: 10px 20px; text-decoration: none; border-radius: 5px; 
-                      margin: 20px 0; }}
-            .footer {{ font-size: 12px; color: #888; margin-top: 30px; text-align: center; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>Подтверждение Email</h1>
-            </div>
-            <div class="content">
-                <p>Здравствуйте!</p>
-                <p>Спасибо за регистрацию на платформе онлайн-консультаций с врачами.</p>
-                <p>Для подтверждения вашего email, пожалуйста, нажмите на кнопку ниже:</p>
-                <p style="text-align: center;">
-                    <a href="{verification_link}" class="button">Подтвердить Email</a>
-                </p>
-                <p>Или перейдите по следующей ссылке:</p>
-                <p><a href="{verification_link}">{verification_link}</a></p>
-                <p>Если вы не регистрировались на нашем сайте, просто проигнорируйте это письмо.</p>
-            </div>
-            <div class="footer">
-                <p>С уважением,<br>Команда платформы онлайн-консультаций с врачами</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    # Прикрепляем текстовую и HTML части к сообщению
-    part1 = MIMEText(text, "plain")
-    part2 = MIMEText(html, "html")
-    message.attach(part1)
-    message.attach(part2)
-    
     try:
-        # Создаем соединение с SMTP-сервером
+        # Создаем объект сообщения
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_FROM
+        msg['To'] = email
+        msg['Subject'] = "Подтверждение регистрации в MedCare"
+        
+        # Создаем HTML-тело письма
+        html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.5;">
+                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; border: 1px solid #e9ecef;">
+                    <h2 style="color: #3b82f6; margin-bottom: 20px;">Подтверждение регистрации</h2>
+                    <p>Спасибо за регистрацию в системе MedCare!</p>
+                    <p>Для активации аккаунта, пожалуйста, перейдите по ссылке:</p>
+                    <p style="margin: 30px 0;">
+                        <a href="{verification_link}" 
+                           style="background-color: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                            Подтвердить email
+                        </a>
+                    </p>
+                    <p>Если вы не регистрировались на нашем сайте, просто проигнорируйте это письмо.</p>
+                    <p>С уважением,<br>Команда MedCare</p>
+                </div>
+            </body>
+        </html>
+        """
+        
+        # Добавляем HTML-часть к сообщению
+        msg.attach(MIMEText(html, 'html'))
+        
+        # Устанавливаем соединение с SMTP-сервером
         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
         server.starttls()  # Включаем шифрование
         
         # Авторизуемся на сервере
         server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
         
-        # Отправляем сообщение
-        server.sendmail(EMAIL_FROM, email, message.as_string())
+        # Отправляем письмо
+        server.send_message(msg)
         
         # Закрываем соединение
         server.quit()
         
-        print(f"Email verification sent to {email}")
+        print(f"Verification email sent to: {email}")
+        print(f"Link: {verification_link}")
+        
     except Exception as e:
-        # В случае ошибки выводим сообщение в консоль
-        # В продакшене здесь должна быть реализована система логирования ошибок
+        # В случае ошибки отправки, выводим ошибку в консоль
         print(f"Error sending email: {e}")
         
-        # В случае ошибки отправки, выводим ссылку в консоль (как запасной вариант)
+        # Выводим ссылку в консоль (как запасной вариант)
         print(f"\n--- EMAIL VERIFICATION FAILED, SHOWING LINK ---")
         print(f"To: {email}")
         print(f"Subject: Confirm your email address")
@@ -274,6 +239,7 @@ def register_user(
         hashed_password=hashed_password,
         is_active=False, # <--- Новый пользователь создается как НЕАКТИВНЫЙ
         role=user.role,
+        auth_provider="email", # Явно указываем, что пользователь зарегистрирован через email
         email_verification_token=verification_token, # Сохраняем токен подтверждения в БД
         email_verification_token_created_at=token_created_at # Сохраняем время создания токена в БД
     )
@@ -296,7 +262,7 @@ def register_user(
 # Эндпоинт для авторизации (получения JWT токена). Не требует авторизации, но проверяет учетные данные.
 # Используем стандартную форму OAuth2 Password Request Form (email/password).
 @app.post("/token", response_model=Token) # response_model=Token указывает, что в ответ ожидается Pydantic модель Token
-def login_for_access_token(
+async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()], # Зависимость для получения стандартной формы email/password
     db: DbDependency # Зависимость для получения сессии БД
 ):
@@ -304,16 +270,15 @@ def login_for_access_token(
     Авторизация пользователя по email и паролю и получение JWT токена доступа.
     Доступ разрешен только для АКТИВНЫХ пользователей.
     """
-    # Ищем пользователя в базе данных по email (который в OAuth2PasswordRequestForm приходит как username)
-    user = db.query(User).filter(User.email == form_data.username).first()
-
-    # Проверяем, найден ли пользователь и совпадает ли введенный пароль с хешированным паролем в БД.
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        # Если пользователь не найден или пароль неверный, возвращаем ошибку 401 Unauthorized
-        # headers={"WWW-Authenticate": "Bearer"} указывает клиенту, что требуется аутентификация по Bearer токену.
+    # Используем функцию authenticate_user для проверки учетных данных
+    # (она также проверяет auth_provider и не позволяет входить через пароль пользователям Google OAuth)
+    user = await authenticate_user(form_data.username, form_data.password, db)
+    
+    if not user:
+        # Если пользователь не найден, пароль неверный или пользователь аутентифицирован через Google
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect email or password. If you registered with Google, please use Google Sign In.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -341,7 +306,7 @@ def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-# Эндпоинт для получения информации о текущем авторизованном пользователе. Требует авторизации.
+# Эндпоинт для получения информации о текущем авторизованном пользователе. Требует авторизацию.
 @app.get("/users/me", response_model=UserResponse) # response_model=UserResponse для форматирования ответа
 # Используем зависимость CurrentUser, которая сама использует get_current_user для проверки токена.
 def read_users_me(current_user: CurrentUser):
@@ -403,7 +368,7 @@ def verify_email(token: str, db: DbDependency): # Принимает токен 
 
 # --- Роуты для профилей ---
 
-# Эндпоинт для создания или обновления профиля Пациента. Требует авторизации и роли 'patient'.
+# Эндпоинт для создания или обновления профиля Пациента. Требует авторизацию и роли 'patient'.
 @app.post("/patients/profiles", response_model=PatientProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_patient_profile(
     profile_data: PatientProfileCreateUpdate, # Данные профиля из запроса (Pydantic модель)
@@ -441,7 +406,7 @@ def create_patient_profile(
         return new_profile # Возвращаем созданный профиль
 
 
-# Эндпоинт для создания или обновления профиля Врача. Требует авторизации и роли 'doctor'.
+# Эндпоинт для создания или обновления профиля Врача. Требует авторизацию и роли 'doctor'.
 @app.post("/doctors/profiles", response_model=DoctorProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_doctor_profile(
     profile_data: DoctorProfileCreateUpdate, # Данные профиля из запроса
@@ -458,20 +423,37 @@ def create_doctor_profile(
     if db_profile:
         # Если профиль уже есть, обновляем его
         for key, value in profile_data.model_dump(exclude_unset=True).items():
-            setattr(db_profile, key, value)
+            # Если врач пытается изменить статус is_active, проверяем, что врач верифицирован
+            if key == 'is_active' and value is not None:
+                # Если врач не верифицирован, он не может активировать свой профиль
+                if not db_profile.is_verified and value == True:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN, 
+                        detail="Активировать профиль может только верифицированный врач")
+                # Обновляем is_active только для верифицированных врачей или при деактивации
+                if db_profile.is_verified or value == False:
+                    setattr(db_profile, key, value)
+            else:
+                # Обновляем остальные поля без ограничений
+                setattr(db_profile, key, value)
         db.commit()
         db.refresh(db_profile)
         return db_profile
     else:
         # Если профиля нет, создаем новый
-        new_profile = DoctorProfile(user_id=current_user.id, **profile_data.model_dump())
+        # Не позволяем создавать профиль со статусом is_active=True, пока не верифицирован
+        new_profile_data = profile_data.model_dump()
+        if 'is_active' in new_profile_data and new_profile_data['is_active'] == True:
+            new_profile_data['is_active'] = False  # По умолчанию профиль неактивен
+        
+        new_profile = DoctorProfile(user_id=current_user.id, **new_profile_data)
         db.add(new_profile)
         db.commit()
         db.refresh(new_profile)
         return new_profile
 
 
-# Эндпоинт для получения профиля текущего авторизованного пользователя (Пациента или Врача). Требует авторизации.
+# Эндпоинт для получения профиля текущего авторизованного пользователя (Пациента или Врача). Требует авторизацию.
 # response_model=Annotated[PatientProfileResponse | DoctorProfileResponse, ...] указывает, что эндпоинт может вернуть одну из двух Pydantic моделей.
 @app.get("/users/me/profile", response_model=Annotated[PatientProfileResponse | DoctorProfileResponse, ...])
 def read_my_profile(db: DbDependency, current_user: CurrentUser): # Требует просто авторизации
@@ -535,7 +517,7 @@ async def get_doctors(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user),  # Опционально, может быть None для публичного доступа
     specialization: Optional[str] = Query(None, description="Фильтр по специализации"),
-    practice_area: Optional[str] = Query(None, description="Фильтр по району практики"),
+    district: Optional[str] = Query(None, description="Фильтр по району практики врача"),
     min_price: Optional[int] = Query(None, description="Минимальная стоимость"),
     max_price: Optional[int] = Query(None, description="Максимальная стоимость"),
     page: int = Query(1, description="Номер страницы (начиная с 1)"),
@@ -545,16 +527,29 @@ async def get_doctors(
     Получение списка всех врачей с возможностью фильтрации по специализации, району практики и диапазону цен.
     Поддерживает пагинацию для большого количества результатов.
     """
-    # Создаем базовый запрос на получение всех врачей
-    query = db.query(DoctorProfile)
+    # Создаем базовый запрос на получение всех активных и верифицированных врачей
+    query = db.query(DoctorProfile).filter(
+        DoctorProfile.is_active == True,
+        DoctorProfile.is_verified == True
+    )
     
-    # Применяем фильтры, если они указаны
+    # Применяем фильтры только если они явно указаны
     if specialization:
-        query = query.filter(DoctorProfile.specialization.ilike(f"%{specialization}%"))
-    if practice_area:
-        query = query.filter(DoctorProfile.practice_areas.ilike(f"%{practice_area}%"))
+        # Используем точное совпадение специализации
+        query = query.filter(DoctorProfile.specialization == specialization)
+        
+    if district:
+        # Используем точное совпадение района
+        query = query.filter(DoctorProfile.district == district)
+    # Если пользователь авторизован как пациент и у него указан район, фильтруем по району
+    elif current_user and current_user.role == 'patient':
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
+        if patient_profile and patient_profile.district:
+            query = query.filter(DoctorProfile.district == patient_profile.district)
+        
     if min_price is not None:
         query = query.filter(DoctorProfile.cost_per_consultation >= min_price)
+        
     if max_price is not None:
         query = query.filter(DoctorProfile.cost_per_consultation <= max_price)
     
@@ -583,8 +578,27 @@ async def get_doctors(
         "pages": pages
     }
 
+# Модель для расширенной информации о враче
+class DoctorDetailResponse(BaseModel):
+    id: int
+    user_id: int
+    full_name: str
+    specialization: str
+    experience: str
+    education: str
+    cost_per_consultation: int
+    practice_areas: str
+    district: Optional[str] = None  # Делаем поле опциональным
+    is_verified: bool
+    is_active: bool
+    rating: float = 0.0
+    reviews_count: int = 0
+    
+    class Config:
+        from_attributes = True
+
 # Получение детальной информации о враче по ID
-@app.get("/api/doctors/{doctor_id}", response_model=DoctorDetail, tags=["doctors"])
+@app.get("/api/doctors/{doctor_id}", response_model=DoctorDetailResponse, tags=["doctors"])
 async def get_doctor_by_id(
     doctor_id: int,
     db: Session = Depends(get_db),
@@ -599,13 +613,24 @@ async def get_doctor_by_id(
     if not doctor:
         raise HTTPException(status_code=404, detail="Врач не найден")
     
-    # Создаем объект с расширенной информацией
-    doctor_detail = doctor.__dict__.copy()
+    # Подготавливаем ответ
+    doctor_detail = DoctorDetailResponse.model_validate(doctor)
     
-    # Добавляем заглушки для рейтинга и количества отзывов
-    # В реальном приложении эти данные будут получены из соответствующих таблиц
-    doctor_detail["rating"] = 4.5  # Заглушка, в будущем будет рассчитываться из таблицы отзывов
-    doctor_detail["reviews_count"] = 10  # Заглушка, в будущем будет считаться из таблицы отзывов
+    # Получаем средний рейтинг и количество отзывов
+    # Сначала получаем все завершенные консультации этого врача
+    consultation_ids = db.query(Consultation.id).filter(
+        Consultation.doctor_id == doctor.user_id,
+        Consultation.status == "completed"
+    ).subquery()
+    
+    # Затем получаем отзывы для этих консультаций
+    reviews = db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
+    
+    # Рассчитываем средний рейтинг и количество отзывов
+    if reviews:
+        total_rating = sum(review.rating for review in reviews)
+        doctor_detail.reviews_count = len(reviews)
+        doctor_detail.rating = round(total_rating / len(reviews), 1)  # Округляем до 1 десятичной цифры
     
     return doctor_detail
 
@@ -768,6 +793,28 @@ async def get_districts():
     ]
     return districts
 
+@app.get("/api/specializations", response_model=List[str])
+async def get_specializations():
+    """Возвращает список специализаций врачей"""
+    specializations = [
+        "Терапевт",
+        "Кардиолог",
+        "Невролог",
+        "Хирург",
+        "Педиатр",
+        "Офтальмолог",
+        "Стоматолог",
+        "Гинеколог",
+        "Уролог",
+        "Эндокринолог",
+        "Дерматолог",
+        "Психиатр",
+        "Онколог",
+        "Отоларинголог (ЛОР)",
+        "Ортопед"
+    ]
+    return specializations
+
 # --- Роуты для заявок на роль врача ---
 
 # Эндпоинт для подачи заявки на роль врача
@@ -871,11 +918,13 @@ async def create_doctor_application(
     return new_application
 
 
-# Эндпоинт для получения заявок пользователя
+# Эндпоинт для получения заявок на роль врача текущего пользователя
 @app.get("/users/me/doctor-applications", response_model=List[DoctorApplicationResponse])
 async def get_my_doctor_applications(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    # Параметр запроса для указания, нужно ли включать просмотренные заявки
+    include_viewed: bool = Query(False, description="Включать уже просмотренные заявки")
 ):
     """
     Получает список заявок на роль врача текущего пользователя.
@@ -883,13 +932,29 @@ async def get_my_doctor_applications(
     Args:
         db: Сессия базы данных
         current_user: Текущий пользователь
+        include_viewed: Флаг, указывающий, нужно ли включать уже просмотренные заявки
         
     Returns:
         List[DoctorApplicationResponse]: Список заявок
     """
-    applications = db.query(DoctorApplication).filter(
+    # Базовый запрос для получения заявок пользователя
+    applications_query = db.query(DoctorApplication).filter(
         DoctorApplication.user_id == current_user.id
-    ).order_by(DoctorApplication.created_at.desc()).all()
+    )
+    
+    if not include_viewed:
+        # Подзапрос для получения ID просмотренных заявок
+        viewed_app_ids = db.query(ViewedNotification.application_id).filter(
+            ViewedNotification.user_id == current_user.id
+        ).subquery()
+        
+        # Исключаем просмотренные заявки
+        applications_query = applications_query.filter(
+            ~DoctorApplication.id.in_(viewed_app_ids)
+        )
+    
+    # Получаем заявки, отсортированные по дате создания
+    applications = applications_query.order_by(DoctorApplication.created_at.desc()).all()
     
     return applications
 
@@ -993,6 +1058,10 @@ async def process_doctor_application(
         if user:
             user.role = "doctor"
             
+            # Получаем профиль пациента, чтобы узнать район
+            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+            district = patient_profile.district if patient_profile and patient_profile.district else "Яшнабадский район"  # Дефолт, если не указан
+            
             # Создаем профиль врача, если его еще нет
             doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
             if not doctor_profile:
@@ -1003,9 +1072,35 @@ async def process_doctor_application(
                     experience=application.experience,
                     education=application.education,
                     cost_per_consultation=1000,  # Значение по умолчанию
-                    is_verified=True
+                    practice_areas=district,
+                    district=district,  # Явно устанавливаем район
+                    is_verified=True,
+                    is_active=True  # Автоматически активируем профиль
                 )
                 db.add(doctor_profile)
+            else:
+                # Обновляем существующий профиль и активируем его
+                doctor_profile.full_name = application.full_name
+                doctor_profile.specialization = application.specialization
+                doctor_profile.experience = application.experience
+                doctor_profile.education = application.education
+                doctor_profile.district = district
+                doctor_profile.practice_areas = district
+                doctor_profile.is_verified = True
+                doctor_profile.is_active = True
+    elif application_data.status == "rejected":
+        # Если заявка отклонена, проверяем существует ли профиль врача и деактивируем его
+        user = db.query(User).filter(User.id == application.user_id).first()
+        if user:
+            # Если у пользователя роль "doctor", меняем на "patient"
+            if user.role == "doctor":
+                user.role = "patient"
+                
+            # Деактивируем профиль врача, если он существует
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+            if doctor_profile:
+                doctor_profile.is_active = False
+                doctor_profile.is_verified = False
     
     db.commit()
     db.refresh(application)
@@ -1174,26 +1269,39 @@ async def change_user_role(
         doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
         if doctor_profile:
             doctor_profile.is_active = False
+            doctor_profile.is_verified = False  # Также снимаем верификацию
     
     # Обрабатываем изменение роли с другой на doctor
     if old_role != "doctor" and role_data.role == "doctor":
         # Проверяем, существует ли профиль врача
         doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+        
+        # Получаем профиль пациента, чтобы узнать район
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+        district = patient_profile.district if patient_profile and patient_profile.district else "Яшнабадский район"  # Дефолт, если не указан
+        
         if doctor_profile:
             # Активируем профиль врача
             doctor_profile.is_active = True
+            doctor_profile.is_verified = True  # Автоматически верифицируем при назначении админом
+            
+            # Обновляем район если он есть в профиле пациента
+            if patient_profile and patient_profile.district:
+                doctor_profile.district = district
+                doctor_profile.practice_areas = district
         else:
-            # Создаем пустой профиль врача, но с флагом неактивного
-            # Врач должен будет заполнить профиль самостоятельно
-            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+            # Создаем профиль врача с районом из профиля пациента
+            full_name = patient_profile.full_name if patient_profile else None
             
             doctor_profile = DoctorProfile(
                 user_id=user.id,
-                full_name=patient_profile.full_name if patient_profile else None,
+                full_name=full_name,
                 specialization="Общая практика",  # Значение по умолчанию
                 cost_per_consultation=1000,  # Значение по умолчанию
                 is_active=True,
-                is_verified=False
+                is_verified=True,  # Автоматически верифицируем при назначении админом
+                district=district,
+                practice_areas=district
             )
             db.add(doctor_profile)
     
@@ -1247,3 +1355,534 @@ def resend_verification_email(email_data: dict, db: DbDependency, background_tas
     background_tasks.add_task(send_verification_email, user.email, verification_token)
     
     return {"message": "Новое письмо с инструкциями для подтверждения email отправлено."}
+
+# Модель для запроса отметки уведомления как просмотренного
+class MarkNotificationRequest(BaseModel):
+    application_id: int
+
+# Эндпоинт для отметки уведомления как просмотренного
+@app.post("/users/me/notifications/viewed", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_notification_viewed(
+    request: MarkNotificationRequest,
+    db: DbDependency,
+    current_user: CurrentUser
+):
+    """
+    Отмечает уведомление о заявке как просмотренное пользователем.
+    
+    Args:
+        request: Данные запроса с ID заявки
+        db: Сессия базы данных
+        current_user: Текущий пользователь
+    
+    Returns:
+        204 No Content
+    """
+    # Проверяем, существует ли заявка
+    application = db.query(DoctorApplication).filter(DoctorApplication.id == request.application_id).first()
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Заявка не найдена"
+        )
+    
+    # Проверяем, не была ли заявка уже отмечена как просмотренная
+    existing_notification = db.query(ViewedNotification).filter(
+        ViewedNotification.user_id == current_user.id,
+        ViewedNotification.application_id == request.application_id
+    ).first()
+    
+    if not existing_notification:
+        # Если нет, создаем новую запись
+        viewed_notification = ViewedNotification(
+            user_id=current_user.id,
+            application_id=request.application_id
+        )
+        db.add(viewed_notification)
+        db.commit()
+    
+    # Возвращаем 204 No Content (успешно, но без тела ответа)
+    return None
+
+# --- Модели для консультаций и сообщений ---
+
+# Модель для создания консультации
+class ConsultationCreate(BaseModel):
+    doctor_id: int
+    
+# Модель для ответа по консультации
+class ConsultationResponse(BaseModel):
+    id: int
+    patient_id: int
+    doctor_id: int
+    status: str
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    chat_time_limit: int
+    
+    class Config:
+        from_attributes = True
+
+# Модель для создания сообщения
+class MessageCreate(BaseModel):
+    content: str
+    
+# Модель для ответа по сообщению
+class MessageResponse(BaseModel):
+    id: int
+    consultation_id: int
+    sender_id: int
+    content: str
+    sent_at: datetime
+    is_read: bool
+    
+    class Config:
+        from_attributes = True
+        
+# Модель для создания отзыва
+class ReviewCreate(BaseModel):
+    rating: int = Field(..., ge=1, le=5)
+    comment: Optional[str] = None
+    
+# Модель для ответа по отзыву
+class ReviewResponse(BaseModel):
+    id: int
+    consultation_id: int
+    rating: int
+    comment: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# --- Роуты для консультаций ---
+
+# Эндпоинт для создания новой консультации
+@app.post("/api/consultations", response_model=ConsultationResponse, tags=["consultations"])
+async def create_consultation(
+    consultation_data: ConsultationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("patient"))
+):
+    """
+    Создает новую консультацию между пациентом и врачом.
+    Доступно только для пациентов.
+    """
+    # Проверяем существование врача
+    doctor = db.query(User).filter(User.id == consultation_data.doctor_id, User.role == "doctor").first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Врач не найден")
+    
+    # Получаем профиль пациента
+    patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
+    if not patient_profile:
+        raise HTTPException(status_code=400, detail="Профиль пациента не найден")
+    
+    # Получаем профиль врача
+    doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation_data.doctor_id).first()
+    if not doctor_profile:
+        raise HTTPException(status_code=400, detail="Профиль врача не найден")
+    
+    # Проверяем, находятся ли врач и пациент в одном районе
+    if patient_profile.district and doctor_profile.district and patient_profile.district != doctor_profile.district:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Врач находится в районе {doctor_profile.district}, а вы в районе {patient_profile.district}. Консультация возможна только с врачами вашего района."
+        )
+    
+    # Проверяем, нет ли уже активной консультации с этим врачом
+    existing_consultation = db.query(Consultation).filter(
+        Consultation.patient_id == current_user.id,
+        Consultation.doctor_id == consultation_data.doctor_id,
+        Consultation.status.in_(["pending", "active"])
+    ).first()
+    
+    if existing_consultation:
+        raise HTTPException(
+            status_code=400,
+            detail="У вас уже есть активная консультация с этим врачом"
+        )
+    
+    # Создаем новую консультацию
+    new_consultation = Consultation(
+        patient_id=current_user.id,
+        doctor_id=consultation_data.doctor_id,
+        status="pending",
+        chat_time_limit=5  # 5 минут по умолчанию
+    )
+    
+    db.add(new_consultation)
+    db.commit()
+    db.refresh(new_consultation)
+    
+    return new_consultation
+
+# Эндпоинт для получения списка консультаций пользователя
+@app.get("/api/consultations", response_model=List[ConsultationResponse], tags=["consultations"])
+async def get_consultations(
+    status: Optional[str] = Query(None, description="Фильтр по статусу: pending, active, completed, cancelled"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает список консультаций текущего пользователя.
+    """
+    # Базовый запрос в зависимости от роли пользователя
+    if current_user.role == "patient":
+        query = db.query(Consultation).filter(Consultation.patient_id == current_user.id)
+    elif current_user.role == "doctor":
+        query = db.query(Consultation).filter(Consultation.doctor_id == current_user.id)
+    else:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    # Применяем фильтр по статусу
+    if status:
+        query = query.filter(Consultation.status == status)
+    
+    # Получаем консультации, сортируя по дате создания (новые сначала)
+    consultations = query.order_by(Consultation.created_at.desc()).all()
+    
+    return consultations
+
+# Эндпоинт для получения деталей консультации
+@app.get("/api/consultations/{consultation_id}", response_model=ConsultationResponse, tags=["consultations"])
+async def get_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает детали конкретной консультации.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа (только участники консультации могут видеть детали)
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
+    return consultation
+
+# Эндпоинт для начала консультации (активация)
+@app.post("/api/consultations/{consultation_id}/start", response_model=ConsultationResponse, tags=["consultations"])
+async def start_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Начинает консультацию (переводит в статус active).
+    Доступно как для пациента, так и для врача.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
+    # Проверяем, что консультация в статусе pending
+    if consultation.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Невозможно начать консультацию в статусе {consultation.status}")
+    
+    # Обновляем статус консультации
+    consultation.status = "active"
+    consultation.started_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(consultation)
+    
+    return consultation
+
+# Эндпоинт для завершения консультации
+@app.post("/api/consultations/{consultation_id}/complete", response_model=ConsultationResponse, tags=["consultations"])
+async def complete_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Завершает консультацию (переводит в статус completed).
+    Доступно как для пациента, так и для врача.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
+    # Проверяем, что консультация в статусе active
+    if consultation.status != "active":
+        raise HTTPException(status_code=400, detail=f"Невозможно завершить консультацию в статусе {consultation.status}")
+    
+    # Проверяем, не прошло ли 5 минут с начала консультации
+    if consultation.started_at:
+        time_elapsed = datetime.utcnow() - consultation.started_at
+        if time_elapsed > timedelta(minutes=consultation.chat_time_limit):
+            # Если прошло больше 5 минут, автоматически завершаем
+            consultation.status = "completed"
+            consultation.completed_at = datetime.utcnow()
+            db.commit()
+            db.refresh(consultation)
+            return consultation
+    
+    # Если время не истекло, обновляем статус консультации
+    consultation.status = "completed"
+    consultation.completed_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(consultation)
+    
+    return consultation
+
+# Эндпоинт для отправки сообщения в чате консультации
+@app.post("/api/consultations/{consultation_id}/messages", response_model=MessageResponse, tags=["consultations"])
+async def send_message(
+    consultation_id: int,
+    message_data: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Отправляет сообщение в чате консультации.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа (только участники консультации могут отправлять сообщения)
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
+    # Проверяем, что консультация активна
+    if consultation.status != "active":
+        raise HTTPException(status_code=400, detail="Отправка сообщений возможна только в активной консультации")
+    
+    # Проверяем, не истекло ли время консультации (5 минут)
+    if consultation.started_at:
+        time_elapsed = datetime.utcnow() - consultation.started_at
+        if time_elapsed > timedelta(minutes=consultation.chat_time_limit):
+            # Автоматически завершаем консультацию
+            consultation.status = "completed"
+            consultation.completed_at = datetime.utcnow()
+            db.commit()
+            
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Время консультации (5 минут) истекло. Консультация автоматически завершена."
+            )
+    
+    # Создаем новое сообщение
+    new_message = Message(
+        consultation_id=consultation_id,
+        sender_id=current_user.id,
+        content=message_data.content,
+        is_read=False
+    )
+    
+    db.add(new_message)
+    db.commit()
+    db.refresh(new_message)
+    
+    return new_message
+
+# Эндпоинт для получения сообщений консультации
+@app.get("/api/consultations/{consultation_id}/messages", response_model=List[MessageResponse], tags=["consultations"])
+async def get_messages(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает все сообщения конкретной консультации.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к сообщениям этой консультации")
+    
+    # Получаем сообщения, сортируя по времени отправки
+    messages = db.query(Message).filter(Message.consultation_id == consultation_id).order_by(Message.sent_at).all()
+    
+    # Отмечаем сообщения как прочитанные, если их отправитель не текущий пользователь
+    for message in messages:
+        if message.sender_id != current_user.id and not message.is_read:
+            message.is_read = True
+    
+    db.commit()
+    
+    return messages
+
+# Эндпоинт для создания отзыва о консультации
+@app.post("/api/consultations/{consultation_id}/review", response_model=ReviewResponse, tags=["consultations"])
+async def create_review(
+    consultation_id: int,
+    review_data: ReviewCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("patient"))
+):
+    """
+    Создает отзыв о консультации.
+    Доступно только для пациента, участвовавшего в консультации.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем, что текущий пользователь является пациентом в этой консультации
+    if current_user.id != consultation.patient_id:
+        raise HTTPException(status_code=403, detail="Вы не можете оставить отзыв о чужой консультации")
+    
+    # Проверяем, что консультация завершена
+    if consultation.status != "completed":
+        raise HTTPException(status_code=400, detail="Отзыв можно оставить только о завершенной консультации")
+    
+    # Проверяем, что отзыв оставляется в течение 5 минут после завершения консультации
+    if consultation.completed_at:
+        time_since_completion = datetime.utcnow() - consultation.completed_at
+        if time_since_completion > timedelta(minutes=5):
+            raise HTTPException(
+                status_code=400, 
+                detail="Время для оставления отзыва истекло (5 минут после завершения консультации)"
+            )
+    
+    # Проверяем, нет ли уже отзыва о данной консультации
+    existing_review = db.query(Review).filter(Review.consultation_id == consultation_id).first()
+    
+    if existing_review:
+        raise HTTPException(status_code=400, detail="Вы уже оставили отзыв об этой консультации")
+    
+    # Создаем новый отзыв
+    new_review = Review(
+        consultation_id=consultation_id,
+        rating=review_data.rating,
+        comment=review_data.comment
+    )
+    
+    db.add(new_review)
+    db.commit()
+    db.refresh(new_review)
+    
+    return new_review
+
+# Эндпоинт для получения отзыва о консультации
+@app.get("/api/consultations/{consultation_id}/review", response_model=ReviewResponse, tags=["consultations"])
+async def get_review(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает отзыв о конкретной консультации.
+    """
+    # Получаем консультацию
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
+    # Получаем отзыв
+    review = db.query(Review).filter(Review.consultation_id == consultation_id).first()
+    
+    if not review:
+        raise HTTPException(status_code=404, detail="Отзыв не найден")
+    
+    return review
+
+# Эндпоинт для получения всех отзывов о враче
+@app.get("/api/doctors/{doctor_id}/reviews", response_model=List[ReviewResponse], tags=["doctors"])
+async def get_doctor_reviews(
+    doctor_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Получает все отзывы о конкретном враче.
+    Доступно без авторизации.
+    """
+    # Проверяем существование врача
+    doctor = db.query(User).filter(User.id == doctor_id, User.role == "doctor").first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Врач не найден")
+    
+    # Получаем все завершенные консультации этого врача
+    consultation_ids = db.query(Consultation.id).filter(
+        Consultation.doctor_id == doctor_id,
+        Consultation.status == "completed"
+    ).subquery()
+    
+    # Получаем отзывы по этим консультациям
+    reviews = db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
+    
+    return reviews
+
+# НОВЫЙ ЭНДПОИНТ ДЛЯ РУЧНОЙ АКТИВАЦИИ АККАУНТА (ТОЛЬКО ДЛЯ РАЗРАБОТКИ)
+@app.post("/manual-activate")
+def manual_activate_user(activation_data: dict, db: DbDependency):
+    """
+    Ручная активация аккаунта пользователя (только для тестирования и разработки).
+    В продакшене этот эндпоинт должен быть отключен.
+    
+    Args:
+        activation_data (dict): Словарь с email пользователя.
+        db (Session): Сессия базы данных.
+        
+    Returns:
+        dict: Сообщение об успешной активации или ошибка.
+    """
+    email = activation_data.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email не указан"
+        )
+    
+    # Ищем пользователя в базе данных
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь с таким email не найден"
+        )
+    
+    # Если пользователь уже активирован, сообщаем об этом
+    if user.is_active:
+        return {"message": "Этот аккаунт уже активирован"}
+    
+    # Активируем пользователя
+    user.is_active = True
+    user.email_verification_token = None
+    user.email_verification_token_created_at = None
+    db.commit()
+    
+    # Получаем верификационный токен из логов
+    token = user.email_verification_token
+    
+    return {
+        "message": "Аккаунт успешно активирован",
+        "user_email": user.email,
+        "is_active": user.is_active
+    }

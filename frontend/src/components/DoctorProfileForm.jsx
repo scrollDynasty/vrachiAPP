@@ -1,356 +1,562 @@
 // frontend/src/components/DoctorProfileForm.jsx
 import React, { useState, useEffect } from 'react';
-
-// Импортируем компоненты Material UI
-import TextField from '@mui/material/TextField'; // Поле ввода текста
-import Button from '@mui/material/Button';     // Кнопка
-import Box from '@mui/material/Box';           // Универсальный контейнер для лейаута
-import Typography from '@mui/material/Typography'; // Текст и заголовки
-import CircularProgress from '@mui/material/CircularProgress'; // Индикатор загрузки
-import Select from '@mui/material/Select';     // Для выпадающего списка специализаций
-import MenuItem from '@mui/material/MenuItem';   // Пункты списка
-import FormControl from '@mui/material/FormControl'; // Контейнер для Select с меткой
-import InputLabel from '@mui/material/InputLabel'; // Метка для Select
-import Chip from '@mui/material/Chip'; // Компонент для отображения выбранных элементов
-import OutlinedInput from '@mui/material/OutlinedInput'; // Стилизованный инпут для мульти-селекта
-import Paper from '@mui/material/Paper'; // Для отображения информации о районе
-import Alert from '@mui/material/Alert'; // Для информационных сообщений
-import InfoIcon from '@mui/icons-material/Info'; // Иконка для информации
-import Tooltip from '@mui/material/Tooltip'; // Тултип для подсказок
-// TODO: Возможно, понадобится Autocomplete или Chip для выбора нескольких районов из списка
-
+import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem, Avatar, Chip } from '@nextui-org/react';
 
 // Компонент формы для профиля Врача
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Врача.
-// Принимает: profile, onSave, isLoading (сохранение), error (сохранение).
-function DoctorProfileForm({ profile, onSave, isLoading, error }) { // Переименовал isLoading/error для ясности в props
-   // Состояния формы, предзаполненные данными из пропса profile
+// Принимает:
+// - profile: Объект с текущими данными профиля врача (null, если профиль не создан).
+// - onSave: Функция, которая будет вызвана при отправке формы с данными профиля.
+// - isLoading: Флаг, указывающий, идет ли процесс сохранения (передается из родительского компонента).
+// - error: Сообщение об ошибке сохранения (передается из родительского компонента).
+function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    const [full_name, setFullName] = useState('');
-   const [specialization, setSpecialization] = useState(''); // Будет значением из списка
-   const [experience_years, setExperienceYears] = useState(''); // Опыт работы в годах (число)
-   const [education, setEducation] = useState(''); // Текст образования
-   const [cost_per_consultation, setCostPerConsultation] = useState(''); // Стоимость (число)
-   const [practice_areas, setPracticeAreas] = useState([]); // Теперь это массив выбранных районов
-   const [district, setDistrict] = useState(''); // Основной район практики из заявки (нередактируемый)
-
-   // Локальное состояние для ошибки валидации формы на фронтенде
+   const [specialization, setSpecialization] = useState('');
+   const [experience_years, setExperienceYears] = useState('');
+   const [education, setEducation] = useState('');
+   const [district, setDistrict] = useState('');
    const [formLocalError, setFormLocalError] = useState(null);
+   const [profileImage, setProfileImage] = useState('');
+   const [isEditing, setIsEditing] = useState(false);
+   
+   // Состояние для модальных окон
+   const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
+   const [isNotificationsModalOpen, setNotificationsModalOpen] = useState(false);
+   const [isDeleteAccountModalOpen, setDeleteAccountModalOpen] = useState(false);
+   
+   const [isGoogleAccount, setIsGoogleAccount] = useState(false);
+   const [currentPassword, setCurrentPassword] = useState('');
+   const [newPassword, setNewPassword] = useState('');
+   const [confirmPassword, setConfirmPassword] = useState('');
+   const [passwordError, setPasswordError] = useState(null);
+   
+   // Настройки уведомлений
+   const [emailNotifications, setEmailNotifications] = useState(true);
+   const [pushNotifications, setPushNotifications] = useState(true);
+   const [appointmentReminders, setAppointmentReminders] = useState(true);
 
-   // TODO: Состояния для списков специализаций и районов (будут загружаться с бэкенда)
-   // const [specializationsList, setSpecializationsList] = useState([]);
-   // const [areasList, setAreasList] = useState([]);
-   // const [isListsLoading, setIsListsLoading] = useState(true); // Флаг загрузки списков
-
-   // Пример статического списка специализаций (временно, пока нет API)
-   const staticSpecializations = [
-       'Терапевт', 'Педиатр', 'Хирург', 'Невролог', 'Кардиолог', 'Окулист', 'ЛОР', 'Стоматолог', 'Гейнеколог' // TODO: Добавить полный список
-   ];
-
-    // Пример статического списка районов Ташкента (временно, пока нет API)
-    const staticAreas = [
-        'Алмазарский район', 'Бектемирский район', 'Мирабадский район', 'Мирзо-Улугбекский район', 'Сергелийский район',
-        'Учтепинский район', 'Чиланзарский район', 'Шайхантаурский район', 'Юнусабадский район', 'Яккасарайский район', 'Яшнабадский район'
-    ]; 
-
-   // Эффект для предзаполнения формы при получении данных профиля из пропсов.
+   // Предзаполнение формы при получении данных профиля
    useEffect(() => {
       if (profile) {
          setFullName(profile.full_name || '');
          setSpecialization(profile.specialization || '');
-         // TODO: Преобразовать опыт работы из строки ("5 лет") в число лет (5)
-         // Регулярное выражение \D находит все нецифровые символы, replace заменяет их на пустую строку. parseInt парсит оставшиеся цифры.
-         setExperienceYears(profile.experience ? parseInt(profile.experience.replace(/\D/g, '')) || '' : ''); // Пример парсинга "5 лет" в 5
-         setEducation(profile.education || ''); // Текст образования
-         setCostPerConsultation(profile.cost_per_consultation || ''); // Числовое поле
          
-         // Устанавливаем основной район из заявки (нередактируемый)
-         setDistrict(profile.district || '');
-         
-         // Если practice_areas пришёл как строка, разбиваем его на массив
-         if (profile.practice_areas) {
-           if (typeof profile.practice_areas === 'string') {
-             // Разделяем строку по запятой и удаляем лишние пробелы
-             const areas = profile.practice_areas.split(',').map(area => area.trim());
-             setPracticeAreas(areas.filter(area => area)); // Фильтруем пустые значения
-           } else if (Array.isArray(profile.practice_areas)) {
-             setPracticeAreas(profile.practice_areas);
-           }
-         } else {
-           // Если районы практики не указаны, устанавливаем основной район как единственный
-           if (profile.district) {
-             setPracticeAreas([profile.district]);
-           }
+         // Преобразуем опыт из строки "X лет" в число
+         if (profile.experience) {
+            const expYears = parseInt(profile.experience.replace(/\D/g, '')) || '';
+            setExperienceYears(expYears);
          }
+         
+         setEducation(profile.education || '');
+         setDistrict(profile.district || profile.practice_areas || '');
+         
+         // Проверка метода авторизации
+         setIsGoogleAccount(profile.isGoogleAccount || false);
+         
+         // Если профиль существует, не включаем режим редактирования по умолчанию
+         setIsEditing(false);
+      } else {
+         // Если профиля нет (null), включаем режим редактирования
+         setIsEditing(true);
       }
-       // Сбрасываем локальную ошибку формы при смене профиля
-       setFormLocalError(null);
-   }, [profile]); // Зависимость: эффект срабатывает при изменении пропса profile
+      
+      // Загрузка изображения из локального хранилища
+      const savedImage = localStorage.getItem('doctor_profileImage');
+      if (savedImage) {
+         setProfileImage(savedImage);
+      }
+      
+      setFormLocalError(null);
+   }, [profile]);
 
-   // TODO: Эффект для загрузки списков специализаций и районов с бэкенда
-   // useEffect(() => {
-   //    const fetchLists = async () => {
-   //       setIsListsLoading(true);
-   //       try {
-   //          const specResponse = await api.get('/specializations'); // TODO: Создать этот эндпоинт на бэкенде
-   //          setSpecializationsList(specResponse.data);
-   //          const areasResponse = await api.get('/areas'); // TODO: Создать этот эндпоинт на бэкенде (вернет список районов Ташкента)
-   //          setAreasList(areasResponse.data);
-   //       } catch (err) {
-   //          console.error("Failed to load lists:", err);
-   //          // TODO: Обработка ошибок загрузки списков
-   //       } finally {
-   //          setIsListsLoading(false);
-   //       }
-   //    };
-   //    fetchLists();
-   // }, []); // Пустой массив зависимостей: эффект запускается один раз при монтировании
-
-
-   // Обработчик отправки формы
+   // Обработчик отправки формы (пустая функция, так как редактирование всех полей запрещено)
    const handleSubmit = (event) => {
       event.preventDefault();
-      setFormLocalError(null); // Сбрасываем локальные ошибки валидации
+      setFormLocalError(null);
 
-      // Валидация на фронтенде: специализация и стоимость обязательны
-      if (!specialization) {
-          setFormLocalError("Пожалуйста, укажите специализацию.");
-          return;
-      }
-       // Проверка, что стоимость является числом и больше 0
-      const cost = parseInt(cost_per_consultation);
-      if (isNaN(cost) || cost <= 0) {
-           setFormLocalError("Пожалуйста, укажите корректную стоимость консультации (число больше 0 сум).");
-           return;
-      }
-       // Проверка, что опыт работы является числом (если заполнено)
-       const experience = parseInt(experience_years);
-       if (experience_years && (isNaN(experience) || experience < 0)) {
-            setFormLocalError("Пожалуйста, укажите корректный опыт работы (число лет).");
-            return;
-       }
-
-      // Проверка, что выбран хотя бы один район
-      if (!practice_areas.length) {
-        setFormLocalError("Пожалуйста, укажите хотя бы один район практики.");
-        return;
-      }
-
-      // Формируем данные для отправки на бэкенд
+      // Здесь формируем данные для обновления профиля
+      // Сейчас мы не разрешаем редактировать никакие поля
       const profileData = {
-         full_name: full_name || null,
-         specialization: specialization, // Обязательное поле (значение из Select)
-         experience: experience_years ? `${experience_years} лет` : null, // TODO: Сохранять опыт как число на бэкенде? Имя поля 'experience'
-         education: education || null, // Текст образования
-         cost_per_consultation: cost, // Отправляем как число
-         practice_areas: district, // Теперь передаем только основной район
-         district: district // Сохраняем основной район (нередактируемый)
+         full_name: full_name || '',
+         specialization: specialization || '',
+         experience: experience_years ? `${experience_years} лет` : '',
+         education: education || '',
+         district: district || ''
       };
 
-      // Вызываем функцию onSave, переданную из родительского компонента.
-      // onSave сам установит isLoading и error.
-      onSave(profileData); // Вызываем функцию сохранения
-
-      // setFormLocalError("Ошибка сохранения профиля врача."); // Пример локальной ошибки формы
-
+      onSave(profileData);
+      
+      // После успешного сохранения выключаем режим редактирования
+      if (!error) {
+         setIsEditing(false);
+      }
    };
-
-   // Обработчик изменения значений в мульти-селекте районов - больше не используется
-   const handleAreasChange = (event) => {
-     // Функция оставлена для совместимости, но районы больше не редактируются
-     return;
+   
+   // Обработчик загрузки изображения
+   const handleImageUpload = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+         const reader = new FileReader();
+         reader.onloadend = () => {
+            const base64String = reader.result;
+            setProfileImage(base64String);
+            
+            // Сохраняем в localStorage с уникальным ключом
+            const storageKey = 'doctor_profileImage';
+            localStorage.setItem(storageKey, base64String);
+            
+            // Отправляем пользовательское событие, чтобы уведомить другие компоненты
+            const profileImageEvent = new CustomEvent('doctorProfileImageUpdated', {
+               detail: { profileImage: base64String }
+            });
+            window.dispatchEvent(profileImageEvent);
+         };
+         reader.readAsDataURL(file);
+      }
    };
-
+   
+   // Обработчик включения режима редактирования (не используется, так как редактирование неактивно)
+   const handleEditClick = () => {
+      setIsEditing(true);
+   };
+   
+   // Обработчик отмены редактирования (не используется, так как редактирование неактивно)
+   const handleCancelEdit = () => {
+      if (profile) {
+         setFullName(profile.full_name || '');
+         setSpecialization(profile.specialization || '');
+         
+         // Преобразуем опыт из строки "X лет" в число
+         if (profile.experience) {
+            const expYears = parseInt(profile.experience.replace(/\D/g, '')) || '';
+            setExperienceYears(expYears);
+         }
+         
+         setEducation(profile.education || '');
+         setDistrict(profile.district || profile.practice_areas || '');
+      }
+      setIsEditing(false);
+      setFormLocalError(null);
+   };
+   
+   // Обработчик клика на фото
+   const handleChangePhotoClick = () => {
+      // Программно кликаем по скрытому полю загрузки файла
+      document.getElementById('doctor-photo-upload').click();
+   };
+   
+   // Обработчик изменения пароля
+   const handlePasswordChange = (e) => {
+      e.preventDefault();
+      setPasswordError(null);
+      
+      if (!isGoogleAccount && !currentPassword) {
+         setPasswordError("Введите текущий пароль");
+         return;
+      }
+      
+      if (newPassword.length < 8) {
+         setPasswordError("Новый пароль должен содержать минимум 8 символов");
+         return;
+      }
+      
+      if (newPassword !== confirmPassword) {
+         setPasswordError("Пароли не совпадают");
+         return;
+      }
+      
+      // Здесь будет логика для изменения пароля
+      alert('Пароль успешно изменен');
+      
+      // Сброс полей и закрытие модального окна
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordModalOpen(false);
+   };
+   
+   // Сохранение настроек уведомлений
+   const handleNotificationsSave = () => {
+      // Здесь будет логика сохранения настроек уведомлений
+      alert('Настройки уведомлений сохранены');
+      setNotificationsModalOpen(false);
+   };
+   
+   // Удаление аккаунта
+   const handleDeleteAccount = () => {
+      // Здесь будет логика удаления аккаунта
+      alert('Аккаунт был удален');
+      setDeleteAccountModalOpen(false);
+   };
 
    return (
-      // Box как контейнер для формы
-      <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}> {/* mt: margin-top */}
-         {/* Заголовок формы */}
-         <Typography variant="h6" gutterBottom>
-            Информация о Враче
-         </Typography>
-
-         {/* Информационное сообщение о нередактируемых полях */}
-         <Alert severity="info" sx={{ mb: 3 }}>
-           <Typography variant="body2">
-             Основная информация о враче (ФИО, специализация, образование, опыт и район практики) 
-             берется из одобренной заявки и не может быть изменена. Вы можете изменить 
-             только стоимость консультации.
-           </Typography>
-         </Alert>
-
-         {/* Показываем информацию о нередактируемом районе */}
-         {district && (
-           <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-             <Typography variant="subtitle2" gutterBottom>
-               Район практики (указан при регистрации):
-             </Typography>
-             <Chip 
-               label={district} 
-               color="primary" 
-               sx={{ mt: 1 }}
-             />
-             <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-               Этот район был указан при подаче заявки и не может быть изменен.
-             </Typography>
-           </Paper>
+      <div className="w-full max-w-5xl mx-auto">
+         {/* Сообщение об ошибке */}
+         {(error || formLocalError) && (
+            <div className="bg-danger-50 text-danger p-4 rounded-xl mb-6">
+               <p className="font-medium">{error || formLocalError}</p>
+            </div>
          )}
-
-         {/* Поле ФИО (нередактируемое) */}
-         <TextField
-            label={
-              <span>
-                ФИО
-                <Tooltip title="Нельзя изменить, так как указано в заявке">
-                  <InfoIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500', verticalAlign: 'middle' }} />
-                </Tooltip>
-              </span>
-            }
-            id="doctor-full-name"
-            value={full_name}
-            variant="outlined"
-            disabled={true}
-            fullWidth
-            margin="normal"
-            sx={{ mb: 2 }}
-         />
-
-         {/* Специализация (нередактируемая) */}
-         <FormControl fullWidth margin="normal" sx={{ mb: 2 }}>
-           <InputLabel id="doctor-specialization-label">
-             <span>
-               Специализация
-               <Tooltip title="Нельзя изменить, так как указано в заявке">
-                 <InfoIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500', verticalAlign: 'middle' }} />
-               </Tooltip>
-             </span>
-           </InputLabel>
-           <Select
-             labelId="doctor-specialization-label"
-             id="doctor-specialization"
-             value={specialization}
-             label="Специализация"
-             disabled={true}
-           >
-             <MenuItem value={specialization}>{specialization}</MenuItem>
-           </Select>
-         </FormControl>
-
-         {/* Опыт работы (нередактируемый) */}
-         <TextField
-            label={
-              <span>
-                Опыт работы (лет)
-                <Tooltip title="Нельзя изменить, так как указано в заявке">
-                  <InfoIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500', verticalAlign: 'middle' }} />
-                </Tooltip>
-              </span>
-            }
-            id="doctor-experience"
-            value={experience_years}
-            variant="outlined"
-            disabled={true}
-            fullWidth
-            margin="normal"
-            sx={{ mb: 2 }}
-         />
-
-         {/* Образование (нередактируемое) */}
-         <TextField
-            label={
-              <span>
-                Образование
-                <Tooltip title="Нельзя изменить, так как указано в заявке">
-                  <InfoIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500', verticalAlign: 'middle' }} />
-                </Tooltip>
-              </span>
-            }
-            id="doctor-education"
-            value={education}
-            variant="outlined"
-            disabled={true}
-            multiline
-            rows={4}
-            fullWidth
-            margin="normal"
-            sx={{ mb: 2 }}
-         />
-
-         {/* Стоимость консультации (редактируемое) */}
-         <TextField
-            label="Стоимость консультации (сум)"
-            id="doctor-cost"
-            value={cost_per_consultation}
-            onChange={(e) => setCostPerConsultation(e.target.value)}
-            type="number"
-            required
-            inputProps={{ min: 1 }}
-            fullWidth
-            margin="normal"
-            sx={{ mb: 2 }}
-         />
-
-         {/* Отображение районов практики (нередактируемое, только для показа) */}
-         <FormControl fullWidth margin="normal" sx={{ mb: 2 }}>
-           <InputLabel id="doctor-areas-label">
-             <span>
-               Район практики
-               <Tooltip title="Нельзя изменить, так как указано в заявке">
-                 <InfoIcon fontSize="small" sx={{ ml: 1, fontSize: '0.8rem', color: 'grey.500', verticalAlign: 'middle' }} />
-               </Tooltip>
-             </span>
-           </InputLabel>
-           <Select
-             labelId="doctor-areas-label"
-             id="doctor-areas"
-             value={[district]}
-             input={<OutlinedInput label="Район практики" />}
-             disabled={true}
-             renderValue={(selected) => (
-               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                 {selected.map((value) => (
-                   <Chip 
-                     key={value} 
-                     label={value} 
-                     color="primary"
-                     size="small"
-                   />
-                 ))}
-               </Box>
-             )}
-           >
-             <MenuItem value={district}>{district}</MenuItem>
-           </Select>
-         </FormControl>
-
-         {/* Отображение локальной ошибки валидации формы */}
-         {formLocalError && (
-            <Typography color="error" sx={{ mt: 2, mb: 2, textAlign: 'center', width: '100%' }}>
-              {formLocalError}
-            </Typography>
-         )}
-
-          {/* Отображение ошибки сохранения из родителя (если нужно отображать внутри формы) */}
-           {/* {error && (
-              <Typography color="error" sx={{ mt: 2, mb: 2, textAlign: 'center', width: '100%' }}>
-                {error}
-              </Typography>
-           )} */}
-
-
-          {/* Контейнер для кнопки сохранения. Центрируем ее. */}
-         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-             {/* Кнопка сохранения формы */}
-             <Button
-               type="submit"
-               variant="contained"
-               color="primary"
-               disabled={isLoading}
-             >
-                {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Сохранить Профиль Врача'}
-             </Button>
-         </Box>
-      </Box>
+         
+         <div className="mb-8">
+            <div className="flex justify-between items-center mb-6">
+               <div className="text-xl font-bold">Настройки профиля врача</div>
+               <div>
+                  {isEditing ? (
+                     <div className="flex gap-2">
+                        <Button 
+                           color="danger" 
+                           variant="flat" 
+                           onClick={handleCancelEdit}
+                           disabled={isLoading}
+                        >
+                           Отмена
+                        </Button>
+                        <Button 
+                           color="primary" 
+                           type="submit"
+                           form="doctor-profile-form"
+                           disabled={isLoading}
+                        >
+                           {isLoading ? <Spinner size="sm" /> : "Сохранить изменения"}
+                        </Button>
+                     </div>
+                  ) : (
+                     <div>
+                        <Chip color="primary" variant="flat" className="mb-2">Ваш профиль зафиксирован администратором</Chip>
+                     </div>
+                  )}
+               </div>
+            </div>
+            
+            <div className="flex flex-col md:flex-row gap-6">
+               {/* Левая колонка - фото профиля и настройки аккаунта */}
+               <div className="md:w-1/3 space-y-6">
+                  {/* Фото профиля */}
+                  <Card className="shadow-sm hover:shadow-md transition-shadow overflow-visible">
+                     <CardBody className="p-6 flex flex-col items-center">
+                        <div className="relative mb-4">
+                           <Avatar 
+                              src={profileImage || "https://i.pravatar.cc/150?img=6"} 
+                              className="w-28 h-28" 
+                              isBordered
+                              color="primary"
+                           />
+                           <input 
+                              type="file" 
+                              id="doctor-photo-upload" 
+                              accept="image/*" 
+                              onChange={handleImageUpload} 
+                              className="hidden" 
+                           />
+                           <Button 
+                              isIconOnly
+                              color="primary" 
+                              size="sm" 
+                              radius="full" 
+                              className="absolute bottom-0 right-0"
+                              onClick={handleChangePhotoClick}
+                           >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                 <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                              </svg>
+                           </Button>
+                        </div>
+                        <div className="text-center">
+                           <h4 className="font-semibold mb-1">{full_name || 'Ваше имя'}</h4>
+                           <p className="text-default-500 text-sm">{specialization || 'Специализация'}</p>
+                        </div>
+                     </CardBody>
+                  </Card>
+                  
+                  {/* Настройки безопасности */}
+                  <Card className="shadow-sm hover:shadow-md transition-shadow">
+                     <CardBody className="p-4">
+                        <div className="flex flex-col h-full">
+                           <div className="mb-3 flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              </svg>
+                              <h3 className="text-medium font-semibold">Безопасность</h3>
+                           </div>
+                           <p className="text-sm text-gray-500 mb-4">Управление паролем и настройками безопасности</p>
+                           <div className="mt-auto">
+                              <Button 
+                                 color="primary"
+                                 variant="flat"
+                                 className="w-full text-sm"
+                                 size="sm"
+                                 onClick={() => setPasswordModalOpen(true)}
+                                 disabled={isGoogleAccount}
+                              >
+                                 Изменить пароль
+                              </Button>
+                              {isGoogleAccount && (
+                                 <p className="text-xs text-gray-400 mt-2">
+                                    Вы используете вход через Google. Управление паролем недоступно.
+                                 </p>
+                              )}
+                           </div>
+                        </div>
+                     </CardBody>
+                  </Card>
+                  
+                  {/* Настройки уведомлений */}
+                  <Card className="shadow-sm hover:shadow-md transition-shadow">
+                     <CardBody className="p-4">
+                        <div className="flex flex-col h-full">
+                           <div className="mb-3 flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                              </svg>
+                              <h3 className="text-medium font-semibold">Уведомления</h3>
+                           </div>
+                           <p className="text-sm text-gray-500 mb-4">Управление email и push-уведомлениями</p>
+                           <div className="mt-auto">
+                              <Button 
+                                 color="primary"
+                                 variant="flat"
+                                 className="w-full text-sm"
+                                 size="sm"
+                                 onClick={() => setNotificationsModalOpen(true)}
+                              >
+                                 Настроить уведомления
+                              </Button>
+                           </div>
+                        </div>
+                     </CardBody>
+                  </Card>
+                  
+                  {/* Удаление аккаунта */}
+                  <Card className="shadow-sm hover:shadow-md transition-shadow">
+                     <CardBody className="p-4">
+                        <div className="flex flex-col h-full">
+                           <div className="mb-3 flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              <h3 className="text-medium font-semibold">Удаление аккаунта</h3>
+                           </div>
+                           <p className="text-sm text-gray-500 mb-4">Полное удаление вашего аккаунта</p>
+                           <div className="mt-auto">
+                              <Button 
+                                 color="danger"
+                                 variant="flat"
+                                 className="w-full text-sm"
+                                 size="sm"
+                                 onClick={() => setDeleteAccountModalOpen(true)}
+                              >
+                                 Удалить аккаунт
+                              </Button>
+                           </div>
+                        </div>
+                     </CardBody>
+                  </Card>
+               </div>
+               
+               {/* Правая колонка - форма профиля */}
+               <div className="md:w-2/3">
+                  <Card className="shadow-sm">
+                     <CardBody className="p-6">
+                        <form id="doctor-profile-form" onSubmit={handleSubmit}>
+                           <div className="space-y-5">
+                              <h3 className="text-xl font-semibold mb-4">Информация о враче</h3>
+                              
+                              <div className="bg-blue-50 text-blue-800 p-4 rounded-lg mb-6">
+                                 <p className="text-sm font-medium mb-1">Примечание:</p>
+                                 <p className="text-sm">Основная информация о враче (ФИО, специализация, образование, опыт и район практики) берется из одобренной заявки и не может быть изменена. Стоимость консультации устанавливается администратором.</p>
+                              </div>
+                              
+                              {/* ФИО (только для просмотра) */}
+                              <Input
+                                 label="ФИО"
+                                 value={full_name}
+                                 readOnly
+                                 variant="bordered"
+                                 isDisabled={true}
+                                 className="max-w-full"
+                              />
+                              
+                              {/* Специализация (только для просмотра) */}
+                              <Input
+                                 label="Специализация"
+                                 value={specialization}
+                                 readOnly
+                                 variant="bordered"
+                                 isDisabled={true}
+                                 className="max-w-full"
+                              />
+                              
+                              {/* Опыт работы (только для просмотра) */}
+                              <Input
+                                 label="Опыт работы (лет)"
+                                 value={experience_years}
+                                 readOnly
+                                 variant="bordered"
+                                 isDisabled={true}
+                                 className="max-w-full"
+                                 endContent={
+                                    <div className="pointer-events-none flex items-center">
+                                       <span className="text-default-400 text-small">лет</span>
+                                    </div>
+                                 }
+                              />
+                              
+                              {/* Образование (только для просмотра) */}
+                              <Textarea
+                                 label="Образование"
+                                 value={education}
+                                 readOnly
+                                 variant="bordered"
+                                 isDisabled={true}
+                                 minRows={3}
+                                 maxRows={5}
+                                 className="max-w-full"
+                              />
+                              
+                              {/* Район практики (только для просмотра) */}
+                              <Input
+                                 label="Район практики"
+                                 value={district}
+                                 readOnly
+                                 variant="bordered"
+                                 isDisabled={true}
+                                 className="max-w-full"
+                              />
+                           </div>
+                        </form>
+                     </CardBody>
+                  </Card>
+               </div>
+            </div>
+         </div>
+         
+         {/* Модальное окно для смены пароля */}
+         <Modal isOpen={isPasswordModalOpen} onClose={() => setPasswordModalOpen(false)}>
+            <ModalContent>
+               <ModalHeader>Изменение пароля</ModalHeader>
+               <ModalBody>
+                  <form onSubmit={handlePasswordChange}>
+                     {passwordError && (
+                        <div className="bg-danger-50 text-danger p-3 rounded-lg mb-4">
+                           <p className="text-sm">{passwordError}</p>
+                        </div>
+                     )}
+                     
+                     {!isGoogleAccount && (
+                        <Input
+                           label="Текущий пароль"
+                           type="password"
+                           value={currentPassword}
+                           onChange={(e) => setCurrentPassword(e.target.value)}
+                           className="mb-4"
+                        />
+                     )}
+                     
+                     <Input
+                        label="Новый пароль"
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="mb-4"
+                     />
+                     
+                     <Input
+                        label="Подтверждение пароля"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                     />
+                  </form>
+               </ModalBody>
+               <ModalFooter>
+                  <Button variant="flat" onClick={() => setPasswordModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={handlePasswordChange}>
+                     Изменить пароль
+                  </Button>
+               </ModalFooter>
+            </ModalContent>
+         </Modal>
+         
+         {/* Модальное окно для настройки уведомлений */}
+         <Modal isOpen={isNotificationsModalOpen} onClose={() => setNotificationsModalOpen(false)}>
+            <ModalContent>
+               <ModalHeader>Настройки уведомлений</ModalHeader>
+               <ModalBody>
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-center py-2">
+                        <div>
+                           <p className="font-medium">Email-уведомления</p>
+                           <p className="text-sm text-gray-500">Получать уведомления на email</p>
+                        </div>
+                        <Switch
+                           checked={emailNotifications}
+                           onChange={(e) => setEmailNotifications(e.target.checked)}
+                        />
+                     </div>
+                     
+                     <Divider />
+                     
+                     <div className="flex justify-between items-center py-2">
+                        <div>
+                           <p className="font-medium">Push-уведомления</p>
+                           <p className="text-sm text-gray-500">Получать уведомления в браузере</p>
+                        </div>
+                        <Switch
+                           checked={pushNotifications}
+                           onChange={(e) => setPushNotifications(e.target.checked)}
+                        />
+                     </div>
+                     
+                     <Divider />
+                     
+                     <div className="flex justify-between items-center py-2">
+                        <div>
+                           <p className="font-medium">Напоминания о консультациях</p>
+                           <p className="text-sm text-gray-500">Получать напоминания о предстоящих консультациях</p>
+                        </div>
+                        <Switch
+                           checked={appointmentReminders}
+                           onChange={(e) => setAppointmentReminders(e.target.checked)}
+                        />
+                     </div>
+                  </div>
+               </ModalBody>
+               <ModalFooter>
+                  <Button variant="flat" onClick={() => setNotificationsModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={handleNotificationsSave}>
+                     Сохранить
+                  </Button>
+               </ModalFooter>
+            </ModalContent>
+         </Modal>
+         
+         {/* Модальное окно для удаления аккаунта */}
+         <Modal isOpen={isDeleteAccountModalOpen} onClose={() => setDeleteAccountModalOpen(false)}>
+            <ModalContent>
+               <ModalHeader>Удаление аккаунта</ModalHeader>
+               <ModalBody>
+                  <div className="bg-danger-50 text-danger p-4 rounded-lg mb-4">
+                     <p className="font-medium">Внимание! Это действие необратимо.</p>
+                  </div>
+                  <p>Вы уверены, что хотите удалить свой аккаунт? Все ваши данные будут безвозвратно удалены.</p>
+               </ModalBody>
+               <ModalFooter>
+                  <Button variant="flat" onClick={() => setDeleteAccountModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="danger" onClick={handleDeleteAccount}>
+                     Удалить аккаунт
+                  </Button>
+               </ModalFooter>
+            </ModalContent>
+         </Modal>
+      </div>
    );
 }
 
-export default DoctorProfileForm; // Экспорт компонента по умолчанию
+export default DoctorProfileForm;

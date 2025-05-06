@@ -1,45 +1,39 @@
-import React from 'react';
-import { Card, CardBody, CardHeader, Tabs, Tab, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell, Chip, Divider } from '@nextui-org/react';
+import React, { useState, useEffect } from 'react';
+import { Card, CardBody, CardHeader, Tabs, Tab, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell, Chip, Divider, Spinner } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
+import api from '../api';
 
 // Компонент страницы истории консультаций и платежей
 function HistoryPage() {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = React.useState("consultations");
+  const [activeTab, setActiveTab] = useState("consultations");
+  const [consultations, setConsultations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   
-  // Заглушка для данных консультаций (в будущем будет получаться с бэкенда)
-  const mockConsultations = [
-    {
-      id: 1,
-      doctorName: "Иванов Иван Иванович",
-      specialization: "Терапевт",
-      date: "2023-05-15",
-      time: "14:00",
-      duration: 30,
-      status: "completed", // completed, upcoming, cancelled
-      cost: 1500
-    },
-    {
-      id: 2,
-      doctorName: "Петрова Анна Сергеевна",
-      specialization: "Кардиолог",
-      date: "2023-06-20",
-      time: "10:30",
-      duration: 45,
-      status: "upcoming",
-      cost: 2000
-    },
-    {
-      id: 3,
-      doctorName: "Сидоров Петр Михайлович",
-      specialization: "Невролог",
-      date: "2023-04-10",
-      time: "16:00",
-      duration: 60,
-      status: "cancelled",
-      cost: 2500
+  // Загрузка реальных консультаций при монтировании компонента
+  useEffect(() => {
+    const fetchConsultations = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Получаем консультации с сервера
+        const response = await api.get('/api/consultations');
+        setConsultations(response.data);
+      } catch (err) {
+        console.error('Error fetching consultations:', err);
+        setError('Не удалось загрузить историю консультаций');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    // Загружаем консультации, только если активна вкладка консультаций
+    if (activeTab === "consultations") {
+      fetchConsultations();
     }
-  ];
+  }, [activeTab]);
   
   // Заглушка для данных платежей (в будущем будет получаться с бэкенда)
   const mockPayments = [
@@ -70,7 +64,8 @@ function HistoryPage() {
   const getConsultationStatusColor = (status) => {
     switch(status) {
       case "completed": return "success";
-      case "upcoming": return "primary";
+      case "active": return "warning";
+      case "pending": return "primary";
       case "cancelled": return "danger";
       default: return "default";
     }
@@ -80,7 +75,8 @@ function HistoryPage() {
   const getConsultationStatusText = (status) => {
     switch(status) {
       case "completed": return "Завершена";
-      case "upcoming": return "Предстоит";
+      case "active": return "Активна";
+      case "pending": return "Ожидает";
       case "cancelled": return "Отменена";
       default: return "Неизвестно";
     }
@@ -112,6 +108,12 @@ function HistoryPage() {
     return new Date(dateString).toLocaleDateString('ru-RU', options);
   };
   
+  // Форматирование времени
+  const formatTime = (dateString) => {
+    const options = { hour: '2-digit', minute: '2-digit' };
+    return new Date(dateString).toLocaleTimeString('ru-RU', options);
+  };
+  
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6 text-center">История</h1>
@@ -134,44 +136,61 @@ function HistoryPage() {
         
         <CardBody>
           {activeTab === "consultations" && (
-            <Table aria-label="История консультаций">
-              <TableHeader>
-                <TableColumn>Врач</TableColumn>
-                <TableColumn>Дата и время</TableColumn>
-                <TableColumn>Длительность</TableColumn>
-                <TableColumn>Стоимость</TableColumn>
-                <TableColumn>Статус</TableColumn>
-              </TableHeader>
-              <TableBody items={mockConsultations}>
-                {(item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{item.doctorName}</div>
-                        <div className="text-sm text-gray-500">{item.specialization}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <div>{formatDate(item.date)}</div>
-                        <div className="text-sm text-gray-500">{item.time}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>{item.duration} мин.</TableCell>
-                    <TableCell>{item.cost} ₽</TableCell>
-                    <TableCell>
-                      <Chip
-                        color={getConsultationStatusColor(item.status)}
-                        variant="flat"
-                        size="sm"
-                      >
-                        {getConsultationStatusText(item.status)}
-                      </Chip>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            <>
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <Spinner size="lg" />
+                </div>
+              ) : error ? (
+                <div className="text-danger text-center py-8">
+                  {error}
+                </div>
+              ) : consultations.length === 0 ? (
+                <div className="text-gray-500 text-center py-8">
+                  У вас пока нет ни одной консультации
+                </div>
+              ) : (
+                <Table aria-label="История консультаций">
+                  <TableHeader>
+                    <TableColumn>{user.role === 'patient' ? 'Врач' : 'Пациент'}</TableColumn>
+                    <TableColumn>Дата и время</TableColumn>
+                    <TableColumn>Статус</TableColumn>
+                  </TableHeader>
+                  <TableBody items={consultations}>
+                    {(item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">
+                              {user.role === 'patient' ? 
+                                `Врач #${item.doctor_id}` : 
+                                `Пациент #${item.patient_id}`}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <div>{formatDate(item.created_at)}</div>
+                            <div className="text-sm text-gray-500">
+                              {item.started_at ? formatTime(item.started_at) : 'Не начата'}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            color={getConsultationStatusColor(item.status)}
+                            variant="flat"
+                            size="sm"
+                          >
+                            {getConsultationStatusText(item.status)}
+                          </Chip>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </>
           )}
           
           {activeTab === "payments" && (
@@ -202,17 +221,6 @@ function HistoryPage() {
               </TableBody>
             </Table>
           )}
-          
-          {((activeTab === "consultations" && mockConsultations.length === 0) || 
-            (activeTab === "payments" && mockPayments.length === 0)) && (
-            <div className="text-center py-8 text-gray-500">
-              История {activeTab === "consultations" ? "консультаций" : "платежей"} пуста.
-            </div>
-          )}
-          
-          <div className="mt-4 text-center text-xs text-gray-500">
-            <p>Примечание: Это демонстрационные данные. Функционал будет полностью доступен в следующей версии платформы.</p>
-          </div>
         </CardBody>
       </Card>
     </div>

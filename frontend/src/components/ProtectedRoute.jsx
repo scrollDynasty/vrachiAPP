@@ -43,7 +43,7 @@ function ProtectedRoute({ allowedRoles }) {
     // Проверяем, существует ли объект пользователя (он должен быть, если isAuthenticated true)
     // и входит ли его роль в массив разрешенных ролей allowedRoles.
     if (!user.role || !allowedRoles.includes(user.role)) {
-      // Если роль не соответствует, показываем сообщение об ошибке доступа (403 Forbidden)
+        // Если роль не соответствует, показываем сообщение об ошибке доступа (403 Forbidden)
       return (
         <div className="flex justify-center items-center min-h-screen bg-gray-50">
           <div className="text-center p-8 bg-white rounded-xl shadow-lg max-w-md">

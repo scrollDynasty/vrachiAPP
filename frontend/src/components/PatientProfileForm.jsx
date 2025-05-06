@@ -335,8 +335,8 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                      <Input
                         label="Контактный телефон"
                         placeholder="+998(XX) XXX-XX-XX"
-                        value={contact_phone}
-                        onChange={(e) => setContactPhone(e.target.value)}
+            value={contact_phone}
+            onChange={(e) => setContactPhone(e.target.value)}
                         variant="bordered"
                         radius="sm"
                         labelPlacement="outside"
@@ -351,10 +351,10 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                      />
                      
                      <Input
-                        label="Адрес"
+            label="Адрес"
                         placeholder="г. Ташкент, ул. Примерная, д. 1, кв. 123"
-                        value={contact_address}
-                        onChange={(e) => setContactAddress(e.target.value)}
+            value={contact_address}
+            onChange={(e) => setContactAddress(e.target.value)}
                         variant="bordered"
                         radius="sm"
                         labelPlacement="outside"
@@ -421,7 +421,7 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
 
                {/* Отображение ошибки валидации */}
                <div className="min-h-[50px] mb-4">
-                  {formLocalError && (
+         {formLocalError && (
                      <div className="bg-danger-50 text-danger p-3 rounded-lg border border-danger-200 text-sm">
                         <div className="flex items-center">
                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -535,7 +535,7 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                         </div>
                         <p className="text-sm text-gray-500 mb-4">Удаление всех данных аккаунта</p>
                         <div className="mt-auto">
-                           <Button 
+             <Button
                               color="danger"
                               variant="flat"
                               className="w-full text-sm"
@@ -753,7 +753,7 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                         </Button>
                         <Button color="danger" size="sm" onClick={handleDeleteAccount}>
                            Подтвердить удаление
-                        </Button>
+             </Button>
                      </ModalFooter>
                   </>
                )}

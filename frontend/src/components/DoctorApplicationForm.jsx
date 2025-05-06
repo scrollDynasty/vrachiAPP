@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Input, Button, Textarea, Spinner, Select, SelectItem } from '@nextui-org/react';
 import api from '../api';
 
@@ -12,20 +12,32 @@ function DoctorApplicationForm({ onSuccess }) {
   const [additionalInfo, setAdditionalInfo] = useState('');
   const [district, setDistrict] = useState('');
   
-  // Список районов Ташкента
-  const districts = [
-    "Алмазарский район",
-    "Бектемирский район",
-    "Мирабадский район",
-    "Мирзо-Улугбекский район",
-    "Сергелийский район",
-    "Учтепинский район",
-    "Чиланзарский район",
-    "Шайхантаурский район",
-    "Юнусабадский район",
-    "Яккасарайский район",
-    "Яшнабадский район"
-  ];
+  // Состояние для списков из бэкенда
+  const [districts, setDistricts] = useState([]);
+  const [specializations, setSpecializations] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  
+  // Загрузка списков районов и специализаций
+  useEffect(() => {
+    const fetchOptions = async () => {
+      try {
+        setLoadingOptions(true);
+        // Загружаем районы
+        const districtResponse = await api.get('/api/districts');
+        setDistricts(districtResponse.data);
+        
+        // Загружаем специализации
+        const specializationResponse = await api.get('/api/specializations');
+        setSpecializations(specializationResponse.data);
+      } catch (err) {
+        console.error('Ошибка при загрузке данных:', err);
+      } finally {
+        setLoadingOptions(false);
+      }
+    };
+    
+    fetchOptions();
+  }, []);
   
   // Состояние для файлов
   const [photo, setPhoto] = useState(null);
@@ -209,7 +221,7 @@ function DoctorApplicationForm({ onSuccess }) {
   // Если форма успешно отправлена, показываем сообщение об успехе
   if (success) {
     return (
-      <div className="bg-green-50 p-6 rounded-lg border border-green-200 text-center">
+      <div className="bg-green-50 p-6 rounded-lg border border-green-200 text-center shadow-md transition-all">
         <div className="flex justify-center mb-4">
           <div className="bg-green-500 rounded-full p-2">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -225,7 +237,7 @@ function DoctorApplicationForm({ onSuccess }) {
         <Button
           color="primary"
           onClick={() => setSuccess(false)}
-          className="mt-2"
+          className="mt-2 shadow-md hover:shadow-lg transition-shadow"
         >
           Отправить еще одну заявку
         </Button>
@@ -233,16 +245,25 @@ function DoctorApplicationForm({ onSuccess }) {
     );
   }
   
+  // Если загружаются опции, показываем спиннер
+  if (loadingOptions) {
+    return (
+      <div className="flex justify-center items-center py-10">
+        <Spinner size="lg" color="primary" label="Загрузка данных..." />
+      </div>
+    );
+  }
+  
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <h3 className="text-xl font-semibold mb-4">Заявка на получение роли врача</h3>
-      <p className="text-gray-600 mb-6">
+      <h3 className="text-xl font-semibold mb-4 text-center text-primary">Заявка на получение роли врача</h3>
+      <p className="text-gray-600 mb-6 text-center">
         Заполните форму ниже, чтобы подать заявку на получение роли врача на нашей платформе.
         После рассмотрения заявки администрацией, вы получите уведомление о результате.
       </p>
       
       {error && (
-        <div className="bg-danger-50 text-danger p-4 rounded-lg border border-danger-200 mb-6">
+        <div className="bg-danger-50 text-danger p-4 rounded-lg border border-danger-200 mb-6 shadow-sm">
           <div className="flex items-center">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -252,255 +273,223 @@ function DoctorApplicationForm({ onSuccess }) {
         </div>
       )}
       
-      <div className="space-y-6">
-        {/* Полное имя */}
-        <Input
-          id="doctor-application-full-name"
-          label="Полное имя"
-          placeholder="Иванов Иван Иванович"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          className="max-w-full"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          {/* ФИО */}
+          <Input
+            type="text"
+            label="Полное имя *"
+            placeholder="Иванов Иван Иванович"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            variant="bordered"
+            fullWidth
+            classNames={{
+              inputWrapper: "shadow-sm hover:shadow transition-shadow"
+            }}
+          />
+          
+          {/* Специализация */}
+          <Select
+            label="Специализация *"
+            placeholder="Выберите вашу специализацию"
+            value={specialization}
+            onChange={(e) => setSpecialization(e.target.value)}
+            variant="bordered"
+            fullWidth
+            classNames={{
+              trigger: "shadow-sm hover:shadow transition-shadow"
+            }}
+          >
+            {specializations.map((spec) => (
+              <SelectItem key={spec} value={spec}>
+                {spec}
+              </SelectItem>
+            ))}
+          </Select>
+          
+          {/* Район практики */}
+          <Select
+            label="Район практики *"
+            placeholder="Выберите район вашей практики"
+            value={district}
+            onChange={(e) => setDistrict(e.target.value)}
+            variant="bordered"
+            fullWidth
+            classNames={{
+              trigger: "shadow-sm hover:shadow transition-shadow"
+            }}
+          >
+            {districts.map((dist) => (
+              <SelectItem key={dist} value={dist}>
+                {dist}
+              </SelectItem>
+            ))}
+          </Select>
+          
+          {/* Опыт работы */}
+          <Input
+            type="text"
+            label="Опыт работы *"
+            placeholder="Например: 5 лет в городской клинике"
+            value={experience}
+            onChange={(e) => setExperience(e.target.value)}
+            variant="bordered"
+            fullWidth
+            classNames={{
+              inputWrapper: "shadow-sm hover:shadow transition-shadow"
+            }}
+          />
+        </div>
         
-        {/* Специализация */}
-        <Input
-          id="doctor-application-specialization"
-          label="Специализация"
-          placeholder="Например: Кардиолог, Терапевт"
-          value={specialization}
-          onChange={(e) => setSpecialization(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          className="max-w-full"
-        />
+        <div className="space-y-4">
+          {/* Образование */}
+          <Textarea
+            label="Образование *"
+            placeholder="Укажите ваше образование, ВУЗ, годы обучения"
+            value={education}
+            onChange={(e) => setEducation(e.target.value)}
+            variant="bordered"
+            fullWidth
+            minRows={2}
+            classNames={{
+              inputWrapper: "shadow-sm hover:shadow transition-shadow"
+            }}
+          />
+          
+          {/* Номер лицензии */}
+          <Input
+            type="text"
+            label="Номер лицензии/сертификата *"
+            placeholder="Например: 123456789"
+            value={licenseNumber}
+            onChange={(e) => setLicenseNumber(e.target.value)}
+            variant="bordered"
+            fullWidth
+            classNames={{
+              inputWrapper: "shadow-sm hover:shadow transition-shadow"
+            }}
+          />
+          
+          {/* Дополнительная информация */}
+          <Textarea
+            label="Дополнительная информация"
+            placeholder="Укажите дополнительную информацию, которая может быть полезна (необязательно)"
+            value={additionalInfo}
+            onChange={(e) => setAdditionalInfo(e.target.value)}
+            variant="bordered"
+            fullWidth
+            minRows={2}
+            classNames={{
+              inputWrapper: "shadow-sm hover:shadow transition-shadow"
+            }}
+          />
+        </div>
+      </div>
+      
+      {/* Загрузка файлов */}
+      <div className="mt-8 space-y-6">
+        <h4 className="text-lg font-semibold text-primary">Загрузка документов</h4>
         
-        {/* Опыт работы */}
-        <Input
-          id="doctor-application-experience"
-          label="Опыт работы"
-          placeholder="Например: 5 лет"
-          value={experience}
-          onChange={(e) => setExperience(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          className="max-w-full"
-        />
-        
-        {/* Образование */}
-        <Textarea
-          id="doctor-application-education"
-          label="Образование"
-          placeholder="Укажите ваше образование (университет, год окончания, специальность)"
-          value={education}
-          onChange={(e) => setEducation(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          minRows={3}
-          className="max-w-full"
-        />
-        
-        {/* Номер лицензии */}
-        <Input
-          id="doctor-application-license-number"
-          label="Номер лицензии/сертификата"
-          placeholder="Укажите номер вашей лицензии или сертификата"
-          value={licenseNumber}
-          onChange={(e) => setLicenseNumber(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          className="max-w-full"
-        />
-        
-        {/* Район практики */}
-        <Select
-          id="doctor-application-district"
-          label="Район практики"
-          placeholder="Выберите район, в котором вы будете принимать пациентов"
-          value={district}
-          onChange={(e) => setDistrict(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          isRequired
-          className="max-w-full"
-        >
-          {districts.map((dist) => (
-            <SelectItem key={dist} value={dist}>
-              {dist}
-            </SelectItem>
-          ))}
-        </Select>
-        
-        {/* Дополнительная информация */}
-        <Textarea
-          id="doctor-application-additional-info"
-          label="Дополнительная информация"
-          placeholder="Укажите дополнительную информацию о вашей практике, специализации или квалификации (по желанию)"
-          value={additionalInfo}
-          onChange={(e) => setAdditionalInfo(e.target.value)}
-          variant="bordered"
-          labelPlacement="outside"
-          minRows={3}
-          className="max-w-full"
-        />
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Фотография */}
           <div className="space-y-2">
-            <div className="font-medium">Фотография *</div>
-            <div className="text-sm text-gray-500 mb-2">Загрузите вашу фотографию для профиля</div>
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-4 h-48 relative">
+            <label className="block text-sm font-medium text-gray-700">Фотография *</label>
+            <div 
+              className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 transition ${
+                photoPreview ? 'border-primary' : 'border-gray-300'
+              }`}
+              onClick={() => photoInputRef.current?.click()}
+            >
               {photoPreview ? (
-                <div className="w-full h-full flex items-center justify-center">
-                  <img src={photoPreview} alt="Preview" className="max-h-full max-w-full object-contain rounded" />
-                  <button
-                    type="button"
-                    className="absolute top-2 right-2 bg-gray-800 bg-opacity-50 text-white rounded-full p-1"
-                    onClick={() => {
-                      setPhoto(null);
-                      setPhotoPreview(null);
-                      if (photoInputRef.current) photoInputRef.current.value = '';
-                    }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                <div className="flex flex-col items-center">
+                  <img src={photoPreview} alt="Preview" className="w-32 h-32 object-cover rounded-lg mb-2" />
+                  <span className="text-xs text-gray-500">Нажмите, чтобы изменить</span>
                 </div>
               ) : (
-                <Button
-                  type="button"
-                  color="primary"
-                  variant="flat"
-                  size="sm"
-                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
-                  onClick={() => photoInputRef.current.click()}
-                >
-                  Загрузить фото
-                </Button>
+                <div className="flex flex-col items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="mt-2 block text-sm text-gray-600">Нажмите для загрузки</span>
+                </div>
               )}
               <input
-                ref={photoInputRef}
                 type="file"
-                accept="image/*"
-                onChange={handlePhotoChange}
                 className="hidden"
+                accept="image/*"
+                ref={photoInputRef}
+                onChange={handlePhotoChange}
               />
             </div>
           </div>
           
           {/* Диплом */}
           <div className="space-y-2">
-            <div className="font-medium">Диплом *</div>
-            <div className="text-sm text-gray-500 mb-2">Загрузите скан вашего диплома о медицинском образовании</div>
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-4 h-48 relative">
-              {diplomaName ? (
-                <div className="w-full h-full flex flex-col items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-primary mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <div className="text-center text-sm truncate max-w-full px-4">{diplomaName}</div>
-                  <button
-                    type="button"
-                    className="absolute top-2 right-2 bg-gray-800 bg-opacity-50 text-white rounded-full p-1"
-                    onClick={() => {
-                      setDiploma(null);
-                      setDiplomaName('');
-                      if (diplomaInputRef.current) diplomaInputRef.current.value = '';
-                    }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  color="primary"
-                  variant="flat"
-                  size="sm"
-                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
-                  onClick={() => diplomaInputRef.current.click()}
-                >
-                  Загрузить диплом
-                </Button>
-              )}
+            <label className="block text-sm font-medium text-gray-700">Скан диплома *</label>
+            <div 
+              className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 transition ${
+                diploma ? 'border-primary' : 'border-gray-300'
+              }`}
+              onClick={() => diplomaInputRef.current?.click()}
+            >
+              <div className="flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="mt-2 block text-sm text-gray-600">
+                  {diplomaName || 'Нажмите для загрузки'}
+                </span>
+              </div>
               <input
-                ref={diplomaInputRef}
                 type="file"
-                accept=".pdf,image/*"
-                onChange={handleDiplomaChange}
                 className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                ref={diplomaInputRef}
+                onChange={handleDiplomaChange}
               />
             </div>
           </div>
           
           {/* Лицензия */}
           <div className="space-y-2">
-            <div className="font-medium">Лицензия *</div>
-            <div className="text-sm text-gray-500 mb-2">Загрузите скан вашей лицензии/сертификата на медицинскую деятельность</div>
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-4 h-48 relative">
-              {licenseName ? (
-                <div className="w-full h-full flex flex-col items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-primary mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <div className="text-center text-sm truncate max-w-full px-4">{licenseName}</div>
-                  <button
-                    type="button"
-                    className="absolute top-2 right-2 bg-gray-800 bg-opacity-50 text-white rounded-full p-1"
-                    onClick={() => {
-                      setLicense(null);
-                      setLicenseName('');
-                      if (licenseInputRef.current) licenseInputRef.current.value = '';
-                    }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  color="primary"
-                  variant="flat"
-                  size="sm"
-                  className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
-                  onClick={() => licenseInputRef.current.click()}
-                >
-                  Загрузить лицензию
-                </Button>
-              )}
+            <label className="block text-sm font-medium text-gray-700">Скан лицензии *</label>
+            <div 
+              className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 transition ${
+                license ? 'border-primary' : 'border-gray-300'
+              }`}
+              onClick={() => licenseInputRef.current?.click()}
+            >
+              <div className="flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="mt-2 block text-sm text-gray-600">
+                  {licenseName || 'Нажмите для загрузки'}
+                </span>
+              </div>
               <input
-                ref={licenseInputRef}
                 type="file"
-                accept=".pdf,image/*"
-                onChange={handleLicenseChange}
                 className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                ref={licenseInputRef}
+                onChange={handleLicenseChange}
               />
             </div>
           </div>
         </div>
       </div>
       
-      <div className="flex justify-center mt-8">
+      {/* Кнопка отправки */}
+      <div className="flex justify-center mt-10">
         <Button
           type="submit"
           color="primary"
           size="lg"
           isLoading={isLoading}
-          className="min-w-[200px]"
+          className="w-full md:w-1/2 shadow-md hover:shadow-lg transition-shadow"
         >
-          {isLoading ? 'Отправка...' : 'Отправить заявку'}
+          {isLoading ? "Отправка заявки..." : "Отправить заявку"}
         </Button>
       </div>
     </form>

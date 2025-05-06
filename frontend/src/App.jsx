@@ -92,12 +92,12 @@ function App() {
       
       {/* Основное содержимое */}
       <main className="pt-4 pb-8">
-        {/* Определение набора маршрутов приложения с помощью компонента Routes */}
-        <Routes>
+      {/* Определение набора маршрутов приложения с помощью компонента Routes */}
+      <Routes>
           {/* Публичные роуты */}
-          <Route path="/login" element={<AuthPage />} />
-          <Route path="/register" element={<AuthPage />} />
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
           <Route path="/admin-piisa-popa" element={<AdminLoginPage />} />
           <Route path="/404" element={<NotFoundPage />} />
@@ -109,7 +109,7 @@ function App() {
           />
 
           {/* Базовые защищенные роуты (требуют только аутентификации) */}
-          <Route element={<ProtectedRoute />}>
+        <Route element={<ProtectedRoute />}>
             {/* Домашняя страница доступна после аутентификации, даже без подтверждения email */}
             <Route path="/" element={<HomePage />} />
             
@@ -122,17 +122,17 @@ function App() {
               <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
               <Route path="/doctor-application" element={<DoctorApplicationPage />} />
             </Route>
-          </Route>
+        </Route>
 
           {/* Защищенные роуты с проверкой роли (для админов) */}
-          <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+        <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
               <Route path="/admin_control_panel_52x9a8" element={<AdminPage />} />
               <Route path="/admin" element={<AdminPage />} />
-          </Route>
+        </Route>
 
-          {/* Роут для всех остальных путей - страница 404 Not Found */}
+        {/* Роут для всех остальных путей - страница 404 Not Found */}
           <Route path="*" element={<Navigate to="/404" replace />} />
-        </Routes>
+      </Routes>
       </main>
       
       {/* Футер приложения (показываем только если пользователь аутентифицирован) */}

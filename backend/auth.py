@@ -203,6 +203,14 @@ async def authenticate_google_user(google_data: dict, db: Session) -> User:
             user.is_active = True
             db.commit()
             db.refresh(user)  # Обновляем объект пользователя после изменений
+            
+        # Если пользователь ранее зарегистрировался с помощью email/пароля,
+        # обновляем его auth_provider на google
+        if user.auth_provider == "email":
+            user.auth_provider = "google"
+            db.commit()
+            db.refresh(user)
+            
         return user
     
     # Если пользователя нет, создаем нового с ролью "patient" по умолчанию
@@ -216,7 +224,8 @@ async def authenticate_google_user(google_data: dict, db: Session) -> User:
         email=email,
         hashed_password=hashed_password,
         is_active=True,  # Пользователь сразу активирован, так как Google подтверждает email
-        role="patient"  # По умолчанию роль - пациент
+        role="patient",  # По умолчанию роль - пациент
+        auth_provider="google"  # Устанавливаем провайдер аутентификации Google
     )
     
     db.add(new_user)
@@ -391,6 +400,11 @@ async def authenticate_user(email: str, password: str, db: Session) -> Optional[
     
     # Если пользователь не найден, возвращаем None
     if not user:
+        return None
+    
+    # Проверяем, что пользователь не зарегистрирован через Google OAuth
+    # Если пользователь зарегистрирован через Google, не позволяем входить с паролем
+    if user.auth_provider == "google":
         return None
     
     # Если пользователь найден, проверяем пароль

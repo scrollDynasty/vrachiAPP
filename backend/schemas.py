@@ -45,7 +45,7 @@ class PatientProfileCreateUpdate(BaseModel):
     full_name: Optional[str] = Field(None, max_length=255)
     contact_phone: Optional[str] = Field(None, max_length=50)
     contact_address: Optional[str] = Field(None, max_length=255)
-    district: Optional[str] = Field(None, max_length=255)
+    district: Optional[str] = Field(None, max_length=255)  # Убираю дефолтное значение
     medical_info: Optional[str] = None
 
 
@@ -73,6 +73,8 @@ class DoctorProfileCreateUpdate(BaseModel):
     # Стоимость консультации, обязательна, должна быть больше 0
     cost_per_consultation: int = Field(..., gt=0) # gt=0 - greater than 0
     practice_areas: Optional[str] = Field(None, max_length=511)
+    district: Optional[str] = Field(None, max_length=255)  # Убираю дефолтное значение
+    is_active: Optional[bool] = None  # Поле для активации/деактивации профиля (только врач может менять)
     # Поле is_verified не включаем в модель для создания/обновления, т.к. его устанавливает Администратор
 
 
@@ -86,7 +88,9 @@ class DoctorProfileResponse(BaseModel):
     education: Optional[str] = None
     cost_per_consultation: int
     practice_areas: Optional[str] = None
+    district: Optional[str] = None  # Убираю дефолтное значение
     is_verified: bool # Статус верификации (возвращаем в ответе)
+    is_active: bool # Статус активности врача (доступен ли для консультаций)
 
     # Настройка для работы с SQLAlchemy ORM
     class Config:
