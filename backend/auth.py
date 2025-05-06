@@ -198,15 +198,19 @@ async def authenticate_google_user(google_data: dict, db: Session) -> User:
     
     # Если пользователь существует, возвращаем его
     if user:
-        # Если пользователь не активирован, активируем его (так как Google подтверждает email)
+        # Убедимся, что пользователь активирован (так как Google подтверждает email)
         if not user.is_active:
             user.is_active = True
             db.commit()
+            db.refresh(user)  # Обновляем объект пользователя после изменений
         return user
     
     # Если пользователя нет, создаем нового с ролью "patient" по умолчанию
     # Пароль не нужен, так как вход через Google
     hashed_password = get_password_hash(os.urandom(32).hex())  # Генерируем случайный пароль
+    
+    # Создаем информацию о пользователе из данных Google
+    name = google_data.get("name", "")
     
     new_user = User(
         email=email,

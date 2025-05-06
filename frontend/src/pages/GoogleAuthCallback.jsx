@@ -14,6 +14,7 @@ function GoogleAuthCallback() {
   const processGoogleAuth = useAuthStore(state => state.processGoogleAuth);
   const needsProfileUpdate = useAuthStore(state => state.needsProfileUpdate);
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
+  const error = useAuthStore(state => state.error);
   
   useEffect(() => {
     const processAuth = async () => {
@@ -34,6 +35,7 @@ function GoogleAuthCallback() {
         const code = searchParams.get('code');
         
         if (!code) {
+          console.error("No authorization code found in URL");
           setStatus('error');
           return;
         }
@@ -48,7 +50,6 @@ function GoogleAuthCallback() {
         setCodeProcessed(true);
         
         // Очищаем URL от параметров, чтобы предотвратить повторное использование кода
-        // при обновлении страницы
         setSearchParams({});
         
         // Call the store function to process the Google auth code
@@ -77,12 +78,19 @@ function GoogleAuthCallback() {
           }
         } else {
           setStatus('error');
+          
+          // Если ошибка связана с повторным использованием кода, перенаправляем на /login
+          if (error && error.message && error.message.includes("invalid_grant")) {
+            setTimeout(() => {
+              navigate('/login');
+            }, 2000);
+          }
         }
       }
     };
     
     processAuth();
-  }, [searchParams, processGoogleAuth, navigate, codeProcessed, isAuthenticated, needsProfileUpdate]);
+  }, [searchParams, processGoogleAuth, navigate, codeProcessed, isAuthenticated, needsProfileUpdate, error]);
   
   // Обработчик завершения заполнения профиля
   const handleProfileComplete = () => {
@@ -130,24 +138,10 @@ function GoogleAuthCallback() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </div>
-            <h2 className="text-xl font-semibold text-gray-800">Произошла ошибка</h2>
+            <h2 className="text-xl font-semibold text-gray-800">Ошибка авторизации</h2>
             <p className="mt-2 text-gray-600">
-              Не удалось завершить авторизацию через Google. Это может быть связано с:
+              {error || "Произошла ошибка при обработке авторизации через Google. Пожалуйста, попробуйте еще раз."}
             </p>
-            <ul className="text-left mt-2 text-gray-600 list-disc pl-6 mb-4">
-              <li>Код авторизации был использован повторно</li>
-              <li>Сессия аутентификации истекла</li>
-              <li>Проблемами с соединением</li>
-            </ul>
-            <p className="mt-2 text-gray-600">
-              Пожалуйста, попробуйте снова, начав новый процесс входа.
-            </p>
-            <button 
-              onClick={() => navigate('/login')}
-              className="mt-6 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors"
-            >
-              Вернуться на страницу входа
-            </button>
           </CardBody>
         </Card>
       )}

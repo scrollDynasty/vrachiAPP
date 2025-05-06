@@ -24,7 +24,7 @@ function LoginForm({ onSubmit, isLoading, error }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <Input
         id="login-email"
         label="Email"
@@ -41,9 +41,9 @@ function LoginForm({ onSubmit, isLoading, error }) {
         fullWidth
         classNames={{
           input: "text-base py-2",
-          inputWrapper: "py-0 h-auto min-h-[56px]",
-          label: "pb-2 text-medium",
-          base: "mb-6"
+          inputWrapper: "py-0 h-auto min-h-[50px]",
+          label: "pb-1 text-medium font-medium",
+          base: "mb-2"
         }}
       />
 
@@ -63,13 +63,13 @@ function LoginForm({ onSubmit, isLoading, error }) {
         fullWidth
         classNames={{
           input: "text-base py-2",
-          inputWrapper: "py-0 h-auto min-h-[56px]",
-          label: "pb-2 text-medium",
-          base: "mb-6"
+          inputWrapper: "py-0 h-auto min-h-[50px]",
+          label: "pb-1 text-medium font-medium",
+          base: "mb-2"
         }}
       />
 
-      <div className="flex justify-between items-center mt-6 mb-6">
+      <div className="flex justify-between items-center mt-2 mb-2">
         <Checkbox
           isSelected={rememberMe}
           onValueChange={setRememberMe}
@@ -83,10 +83,10 @@ function LoginForm({ onSubmit, isLoading, error }) {
         </Link>
       </div>
 
-      {/* Контейнер для сообщений об ошибках с фиксированной высотой */}
-      <div className="min-h-[60px] mb-4">
+      {/* Контейнер для сообщений об ошибках с уменьшенной фиксированной высотой */}
+      <div className="min-h-[40px]">
         {formError && (
-          <div className="text-danger text-sm p-3 bg-danger-50 rounded border border-danger-200">
+          <div className="text-danger text-sm p-2 bg-danger-50 rounded border border-danger-200">
             {formError}
           </div>
         )}
@@ -95,9 +95,10 @@ function LoginForm({ onSubmit, isLoading, error }) {
       <Button
         type="submit"
         color="primary"
-        className="w-full mt-4"
+        className="w-full mt-2"
         isLoading={isLoading}
         size="lg"
+        disableRipple
       >
         {isLoading ? <Spinner size="sm" color="white" /> : 'Войти'}
       </Button>

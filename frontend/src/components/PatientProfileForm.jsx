@@ -1,6 +1,6 @@
 // frontend/src/components/PatientProfileForm.jsx
 import React, { useState, useEffect } from 'react';
-import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch } from '@nextui-org/react';
+import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem } from '@nextui-org/react';
 
 // Компонент формы для профиля Пациента
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Пациента.
@@ -13,9 +13,26 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
    const [full_name, setFullName] = useState('');
    const [contact_phone, setContactPhone] = useState('');
    const [contact_address, setContactAddress] = useState('');
+   const [district, setDistrict] = useState('');
    const [medicalInfo, setMedicalInfo] = useState('');
    const [formLocalError, setFormLocalError] = useState(null);
    const [profileImage, setProfileImage] = useState('');
+   const [isEditing, setIsEditing] = useState(false);
+   
+   // Список районов Ташкента
+   const districts = [
+     { value: "Алмазарский район", label: "Алмазарский район" },
+     { value: "Бектемирский район", label: "Бектемирский район" },
+     { value: "Мирабадский район", label: "Мирабадский район" },
+     { value: "Мирзо-Улугбекский район", label: "Мирзо-Улугбекский район" },
+     { value: "Сергелийский район", label: "Сергелийский район" },
+     { value: "Учтепинский район", label: "Учтепинский район" },
+     { value: "Чиланзарский район", label: "Чиланзарский район" },
+     { value: "Шайхантаурский район", label: "Шайхантаурский район" },
+     { value: "Юнусабадский район", label: "Юнусабадский район" },
+     { value: "Яккасарайский район", label: "Яккасарайский район" },
+     { value: "Яшнабадский район", label: "Яшнабадский район" }
+   ];
    
    // Состояние для модальных окон
    const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
@@ -39,11 +56,22 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
          setFullName(profile.full_name || '');
          setContactPhone(profile.contact_phone || '');
          setContactAddress(profile.contact_address || '');
+         setDistrict(profile.district || '');
          setMedicalInfo(profile.medical_info || '');
          
          // Проверка метода авторизации (для демонстрации, в реальности нужно получать из профиля)
          // В реальном приложении эта информация должна приходить с бэкенда
          setIsGoogleAccount(profile.isGoogleAccount || false);
+         
+         // Если профиль существует, не включаем режим редактирования по умолчанию
+         setIsEditing(false);
+
+         // Отладочное сообщение для проверки данных
+         console.log('Profile data:', profile);
+         console.log('Medical info:', profile.medical_info);
+      } else {
+         // Если профиля нет (null), включаем режим редактирования
+         setIsEditing(true);
       }
       
       // Загрузка изображения из локального хранилища
@@ -69,10 +97,35 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
          full_name: full_name || null,
          contact_phone: contact_phone || null,
          contact_address: contact_address || null,
+         district: district || null,
          medical_info: medicalInfo || null
       };
 
       onSave(profileData);
+      
+      // После успешного сохранения выключаем режим редактирования
+      if (!error) {
+         setIsEditing(false);
+      }
+   };
+   
+   // Обработчик включения режима редактирования
+   const handleEditClick = () => {
+      setIsEditing(true);
+   };
+   
+   // Обработчик отмены редактирования
+   const handleCancelEdit = () => {
+      // Восстанавливаем данные из profile и выключаем режим редактирования
+      if (profile) {
+         setFullName(profile.full_name || '');
+         setContactPhone(profile.contact_phone || '');
+         setContactAddress(profile.contact_address || '');
+         setDistrict(profile.district || '');
+         setMedicalInfo(profile.medical_info || '');
+      }
+      setIsEditing(false);
+      setFormLocalError(null);
    };
    
    // Обработчик изменения пароля
@@ -114,7 +167,17 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
          reader.onloadend = () => {
             const base64String = reader.result;
             setProfileImage(base64String);
-            localStorage.setItem('profileImage', base64String);
+            
+            // Сохраняем в localStorage с уникальным ключом, включая временную метку для предотвращения кэширования
+            const storageKey = 'vrach_profileImage';
+            localStorage.setItem(storageKey, base64String);
+            
+            // Отправляем пользовательское событие, чтобы уведомить другие компоненты
+            const profileImageEvent = new CustomEvent('profileImageUpdated', {
+               detail: { profileImage: base64String }
+            });
+            window.dispatchEvent(profileImageEvent);
+            console.log('Событие profileImageUpdated отправлено');
          };
          reader.readAsDataURL(file);
       }
@@ -165,142 +228,242 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                   </div>
                )}
             </div>
-            <input 
-               type="file" 
-               ref={avatarInputRef}
-               className="hidden" 
-               accept="image/*" 
-               onChange={handleImageUpload}
-            />
-            <Button
-               color="primary"
-               className="font-medium"
-               size="sm"
-               radius="full"
-               onClick={handleChangePhotoClick}
-            >
-               Изменить фото
-            </Button>
+            {isEditing && (
+               <>
+                 <input 
+                    type="file" 
+                    ref={avatarInputRef}
+                    className="hidden" 
+                    accept="image/*" 
+                    onChange={handleImageUpload}
+                 />
+                 <Button
+                    color="primary"
+                    className="font-medium"
+                    size="sm"
+                    radius="full"
+                    onClick={handleChangePhotoClick}
+                 >
+                    Изменить фото
+                 </Button>
+               </>
+            )}
          </div>
       
-         <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="mb-6">
-               <h3 className="text-lg font-semibold mb-2 text-gray-800">Основная информация</h3>
-               <p className="text-sm text-gray-500 mb-4">Используется для идентификации вас в системе</p>
+         {/* Заголовок секции и кнопка редактирования */}
+         <div className="flex justify-between items-center mb-2">
+            <h3 className="text-lg font-semibold text-gray-800">Профиль пациента</h3>
+            {!isEditing && profile && (
+               <Button 
+                  color="primary" 
+                  variant="light" 
+                  size="sm"
+                  startContent={
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                     </svg>
+                  }
+                  onClick={handleEditClick}
+               >
+                  Редактировать
+               </Button>
+            )}
+         </div>
+         
+         {/* Режим просмотра (нередактируемый) */}
+         {!isEditing && profile && (
+            <Card className="mb-6 shadow-sm">
+               <CardBody className="p-5">
+                  <div className="space-y-4">
+                     <div>
+                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Полное имя</h4>
+                        <p className="text-medium">{full_name || 'Не указано'}</p>
+                     </div>
+                     
+                     <div>
+                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Контактный телефон</h4>
+                        <p className="text-medium">{contact_phone || 'Не указано'}</p>
+                     </div>
+                     
+                     <div>
+                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Адрес</h4>
+                        <p className="text-medium">{contact_address || 'Не указано'}</p>
+                     </div>
+                     
+                     <div>
+                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Район</h4>
+                        <p className="text-medium">{district || 'Не указано'}</p>
+                     </div>
+                     
+                     <Divider className="my-3" />
+                     
+                     <div>
+                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Медицинская информация</h4>
+                        <p className="text-medium whitespace-pre-line">{medicalInfo || 'Не указано'}</p>
+                     </div>
+                  </div>
+               </CardBody>
+            </Card>
+         )}
+         
+         {/* Режим редактирования */}
+         {isEditing && (
+            <form onSubmit={handleSubmit} className="space-y-6">
+               <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-2 text-gray-800">Основная информация</h3>
+                  <p className="text-sm text-gray-500 mb-4">Используется для идентификации вас в системе</p>
+                  
+                  <div className="space-y-4">
+                     <Input
+                        label="Полное имя"
+                        placeholder="Иванов Иван Иванович"
+                        value={full_name}
+                        onChange={(e) => setFullName(e.target.value)}
+                        variant="bordered"
+                        radius="sm"
+                        isRequired
+                        labelPlacement="outside"
+                        size="md"
+                        classNames={{
+                           input: "text-sm py-2",
+                           inputWrapper: "py-0 h-auto min-h-[46px]",
+                           label: "pb-1 text-small font-medium",
+                           base: "mb-4"
+                        }}
+                     />
+                     
+                     <Input
+                        label="Контактный телефон"
+                        placeholder="+998(XX) XXX-XX-XX"
+                        value={contact_phone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        variant="bordered"
+                        radius="sm"
+                        labelPlacement="outside"
+                        size="md"
+                        type="tel"
+                        classNames={{
+                           input: "text-sm py-2",
+                           inputWrapper: "py-0 h-auto min-h-[46px]",
+                           label: "pb-1 text-small font-medium",
+                           base: "mb-4"
+                        }}
+                     />
+                     
+                     <Input
+                        label="Адрес"
+                        placeholder="г. Ташкент, ул. Примерная, д. 1, кв. 123"
+                        value={contact_address}
+                        onChange={(e) => setContactAddress(e.target.value)}
+                        variant="bordered"
+                        radius="sm"
+                        labelPlacement="outside"
+                        size="md"
+                        classNames={{
+                           input: "text-sm py-2",
+                           inputWrapper: "py-0 h-auto min-h-[46px]",
+                           label: "pb-1 text-small font-medium",
+                           base: "mb-4"
+                        }}
+                     />
+                     
+                     <Select
+                       label="Район"
+                       placeholder="Выберите район"
+                       labelPlacement="outside"
+                       selectedKeys={district ? [district] : []}
+                       onSelectionChange={(keys) => {
+                         const selected = Array.from(keys)[0];
+                         setDistrict(selected || '');
+                       }}
+                       variant="bordered"
+                       radius="sm"
+                       size="md"
+                       classNames={{
+                         trigger: "h-auto min-h-[46px] py-0",
+                         label: "pb-1 text-small font-medium",
+                         base: "mb-4"
+                       }}
+                     >
+                       {districts.map((dist) => (
+                         <SelectItem key={dist.value} value={dist.value}>
+                           {dist.label}
+                         </SelectItem>
+                       ))}
+                     </Select>
+                  </div>
+               </div>
                
-               <div className="space-y-4">
-                  <Input
-                     label="Полное имя"
-                     placeholder="Иванов Иван Иванович"
-                     value={full_name}
-                     onChange={(e) => setFullName(e.target.value)}
-                     variant="bordered"
-                     radius="sm"
-                     isRequired
-                     labelPlacement="outside"
-                     size="md"
-                     classNames={{
-                        input: "text-sm py-2",
-                        inputWrapper: "py-0 h-auto min-h-[46px]",
-                        label: "pb-1 text-small font-medium",
-                        base: "mb-4"
-                     }}
-                  />
+               <Divider className="my-6" />
+               
+               <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-2 text-gray-800">Медицинская информация</h3>
+                  <p className="text-sm text-gray-500 mb-4">Эта информация поможет врачам лучше понять вашу историю</p>
                   
-                  <Input
-                     label="Контактный телефон"
-                     placeholder="+998(XX) XXX-XX-XX"
-                     value={contact_phone}
-                     onChange={(e) => setContactPhone(e.target.value)}
+                  <Textarea
+                     label="Медицинская информация"
+                     placeholder="Укажите информацию о хронических заболеваниях, аллергиях, группе крови и другую важную медицинскую информацию"
+                     value={medicalInfo}
+                     onChange={(e) => setMedicalInfo(e.target.value)}
                      variant="bordered"
                      radius="sm"
                      labelPlacement="outside"
                      size="md"
-                     type="tel"
+                     minRows={3}
                      classNames={{
                         input: "text-sm py-2",
-                        inputWrapper: "py-0 h-auto min-h-[46px]",
-                        label: "pb-1 text-small font-medium",
-                        base: "mb-4"
-                     }}
-                  />
-                  
-                  <Input
-                     label="Адрес"
-                     placeholder="г. Москва, ул. Примерная, д. 1, кв. 123"
-                     value={contact_address}
-                     onChange={(e) => setContactAddress(e.target.value)}
-                     variant="bordered"
-                     radius="sm"
-                     labelPlacement="outside"
-                     size="md"
-                     classNames={{
-                        input: "text-sm py-2",
-                        inputWrapper: "py-0 h-auto min-h-[46px]",
+                        inputWrapper: "py-0 min-h-[100px]",
                         label: "pb-1 text-small font-medium",
                         base: "mb-4"
                      }}
                   />
                </div>
-            </div>
-            
-            <Divider className="my-6" />
-            
-            <div className="mb-6">
-               <h3 className="text-lg font-semibold mb-2 text-gray-800">Медицинская информация</h3>
-               <p className="text-sm text-gray-500 mb-4">Эта информация поможет врачам лучше понять вашу историю</p>
-               
-               <Textarea
-                  label="Медицинская информация"
-                  placeholder="Укажите информацию о хронических заболеваниях, аллергиях, группе крови и другую важную медицинскую информацию"
-                  value={medicalInfo}
-                  onChange={(e) => setMedicalInfo(e.target.value)}
-                  variant="bordered"
-                  radius="sm"
-                  labelPlacement="outside"
-                  size="md"
-                  minRows={3}
-                  classNames={{
-                     input: "text-sm py-2",
-                     inputWrapper: "py-0 min-h-[100px]",
-                     label: "pb-1 text-small font-medium",
-                     base: "mb-4"
-                  }}
-               />
-            </div>
 
-            {/* Отображение ошибки валидации */}
-            <div className="min-h-[50px] mb-4">
-               {formLocalError && (
-                  <div className="bg-danger-50 text-danger p-3 rounded-lg border border-danger-200 text-sm">
-                     <div className="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <p className="font-medium">{formLocalError}</p>
+               {/* Отображение ошибки валидации */}
+               <div className="min-h-[50px] mb-4">
+                  {formLocalError && (
+                     <div className="bg-danger-50 text-danger p-3 rounded-lg border border-danger-200 text-sm">
+                        <div className="flex items-center">
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                           </svg>
+                           <p className="font-medium">{formLocalError}</p>
+                        </div>
                      </div>
-                  </div>
-               )}
-            </div>
-            
-            <div className="flex justify-center pt-2">
-               <Button
-                  type="submit"
-                  color="primary"
-                  size="md"
-                  radius="sm"
-                  className="font-medium min-w-[180px]"
-                  isLoading={isLoading}
-                  startContent={!isLoading && (
-                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                     </svg>
                   )}
-               >
-                  {isLoading ? 'Сохранение...' : 'Сохранить профиль'}
-               </Button>
-            </div>
-         </form>
+               </div>
+               
+               <div className="flex justify-center space-x-3 pt-2">
+                  {profile && (
+                     <Button
+                        type="button"
+                        color="default"
+                        size="md"
+                        radius="sm"
+                        className="font-medium min-w-[140px]"
+                        onClick={handleCancelEdit}
+                     >
+                        Отмена
+                     </Button>
+                  )}
+                  <Button
+                     type="submit"
+                     color="primary"
+                     size="md"
+                     radius="sm"
+                     className="font-medium min-w-[140px]"
+                     isLoading={isLoading}
+                     startContent={!isLoading && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                     )}
+                  >
+                     {isLoading ? 'Сохранение...' : 'Сохранить профиль'}
+                  </Button>
+               </div>
+            </form>
+         )}
          
          {/* Футер с настройками аккаунта */}
          <div className="mt-12 pt-6 border-t border-gray-200">

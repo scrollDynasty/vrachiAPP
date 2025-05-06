@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Navbar, 
@@ -20,6 +20,33 @@ function Header() {
   const { isAuthenticated, user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [profileImage, setProfileImage] = useState(null);
+  
+  // Загружаем фото профиля из localStorage при монтировании компонента
+  useEffect(() => {
+    // Используем новый уникальный ключ для изображения профиля
+    const storageKey = 'vrach_profileImage';
+    const savedImage = localStorage.getItem(storageKey);
+    
+    
+    if (savedImage) {
+      setProfileImage(savedImage);
+    } else {
+    }
+    
+    // Добавляем слушатель события обновления изображения профиля
+    const handleProfileImageUpdate = (event) => {
+      const { profileImage } = event.detail;
+      setProfileImage(profileImage);
+    };
+    
+    window.addEventListener('profileImageUpdated', handleProfileImageUpdate);
+    
+    // Удаляем слушатель события при размонтировании компонента
+    return () => {
+      window.removeEventListener('profileImageUpdated', handleProfileImageUpdate);
+    };
+  }, []);
   
   // Обработчики навигации
   const handleProfileClick = () => navigate('/profile');
@@ -33,7 +60,7 @@ function Header() {
     if (user.profile?.firstName && user.profile?.lastName) {
       return `${user.profile.firstName[0]}${user.profile.lastName[0]}`.toUpperCase();
     }
-    return user.email[0].toUpperCase();
+    return user.email && typeof user.email === 'string' ? user.email[0].toUpperCase() : '?';
   };
   
   return (
@@ -95,12 +122,23 @@ function Header() {
               </NavbarItem>
             )}
             
-            <NavbarItem>
-              <Link to="/history" className="text-gray-700 hover:text-primary transition-colors relative group">
-                История
-                <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></span>
-              </Link>
-            </NavbarItem>
+            {user?.role === 'admin' && (
+              <NavbarItem>
+                <Link to="/admin" className="text-gray-700 hover:text-purple-600 transition-colors relative group">
+                  Админ-панель
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-purple-600 transition-all duration-300 group-hover:w-full"></span>
+                </Link>
+              </NavbarItem>
+            )}
+            
+            {user?.role !== 'admin' && (
+              <NavbarItem>
+                <Link to="/history" className="text-gray-700 hover:text-primary transition-colors relative group">
+                  История
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></span>
+                </Link>
+              </NavbarItem>
+            )}
           </>
         )}
       </NavbarContent>
@@ -114,6 +152,7 @@ function Header() {
                 as="button"
                 color="primary"
                 size="sm"
+                src={profileImage}
                 name={getAvatarText()}
                 className="transition-transform cursor-pointer hover:scale-110 hover:shadow-md"
               />
@@ -128,27 +167,46 @@ function Header() {
               </DropdownItem>
               
               <DropdownItem key="role" textValue="Роль" className="text-gray-500 text-xs py-2" isReadOnly>
-                {user?.role === 'patient' ? 'Пациент' : 'Врач'}
+                {user?.role === 'patient' ? 'Пациент' : 
+                 user?.role === 'doctor' ? 'Врач' : 
+                 user?.role === 'admin' ? 'Администратор' : 'Пользователь'}
               </DropdownItem>
               
-              <DropdownItem key="settings" onPress={handleProfileClick} className="py-2.5 hover:bg-blue-50">
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  Настройки профиля
-                </div>
-              </DropdownItem>
+              <DropdownItem key="divider" textValue="Divider" className="h-px bg-gray-200 my-1" isReadOnly/>
               
-              <DropdownItem key="history" onPress={handleHistoryClick} className="py-2.5 hover:bg-blue-50">
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  История
-                </div>
-              </DropdownItem>
+              {user?.role !== 'admin' && (
+                <DropdownItem key="profile-settings" onPress={handleProfileClick} className="py-2.5 hover:bg-blue-50">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Настройки профиля
+                  </div>
+                </DropdownItem>
+              )}
+              
+              {user?.role === 'admin' && (
+                <DropdownItem key="admin-panel" onPress={() => navigate('/admin')} className="py-2.5 hover:bg-purple-50">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Админ-панель
+                  </div>
+                </DropdownItem>
+              )}
+              
+              {user?.role !== 'admin' && (
+                <DropdownItem key="history" onPress={handleHistoryClick} className="py-2.5 hover:bg-blue-50">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    История
+                  </div>
+                </DropdownItem>
+              )}
               
               {user?.role === 'patient' && (
                 <DropdownItem key="search" onPress={handleSearchDoctorsClick} className="py-2.5 hover:bg-blue-50">
@@ -189,6 +247,19 @@ function Header() {
               </Link>
             </NavbarMenuItem>
             
+            {user?.role === 'admin' && (
+              <NavbarMenuItem>
+                <Link to="/admin" className="w-full py-2 text-gray-700 hover:text-purple-600 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Админ-панель
+                  </div>
+                </Link>
+              </NavbarMenuItem>
+            )}
+            
             {user?.role === 'patient' && (
               <NavbarMenuItem>
                 <Link to="/search-doctors" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
@@ -202,28 +273,32 @@ function Header() {
               </NavbarMenuItem>
             )}
             
-            <NavbarMenuItem>
-              <Link to="/history" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  История
-                </div>
-              </Link>
-            </NavbarMenuItem>
+            {user?.role !== 'admin' && (
+              <NavbarMenuItem>
+                <Link to="/history" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    История
+                  </div>
+                </Link>
+              </NavbarMenuItem>
+            )}
             
-            <NavbarMenuItem>
-              <Link to="/profile" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  Настройки профиля
-                </div>
-              </Link>
-            </NavbarMenuItem>
+            {user?.role !== 'admin' && (
+              <NavbarMenuItem>
+                <Link to="/profile" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Настройки профиля
+                  </div>
+                </Link>
+              </NavbarMenuItem>
+            )}
             
             <NavbarMenuItem>
               <div className="w-full py-2 cursor-pointer text-red-600 hover:text-red-700 transition-colors" onClick={handleLogout}>

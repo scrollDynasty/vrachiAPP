@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, CardBody, Button, Divider, Spinner, Chip } from '@nextui-org/react';
+import { Card, CardBody, Button, Divider, Spinner, Chip, Tooltip } from '@nextui-org/react';
 import { doctorsApi } from '../api';
+import useAuthStore from '../stores/authStore';
 
 // Компонент для секции информации в профиле
 const InfoSection = ({ title, children }) => (
@@ -15,11 +16,26 @@ const InfoSection = ({ title, children }) => (
 function DoctorProfilePage() {
   const { doctorId } = useParams(); // Получаем ID врача из URL
   const navigate = useNavigate();
+  const { user } = useAuthStore(); // Получаем текущего пользователя
   
   // Состояния для данных
   const [doctor, setDoctor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Проверяем, может ли пользователь запрашивать консультацию
+  const canRequestConsultation = () => {
+    // Проверяем, что пользователь авторизован
+    if (!user) return false;
+    
+    // Проверяем, что пользователь - пациент
+    if (user.role !== 'patient') return false;
+    
+    // Проверяем, что доктор активен
+    if (!doctor || !doctor.is_active) return false;
+    
+    return true;
+  };
   
   // Загружаем данные врача при первом рендере
   useEffect(() => {
@@ -46,6 +62,24 @@ function DoctorProfilePage() {
   
   // Заглушка для обработчика "Подать заявку на консультацию"
   const handleRequestConsultation = () => {
+    if (!canRequestConsultation()) {
+      if (!user) {
+        alert("Для записи на консультацию необходимо войти в систему.");
+        navigate('/login');
+        return;
+      }
+      
+      if (user.role !== 'patient') {
+        alert("Только пациенты могут записываться на консультации.");
+        return;
+      }
+      
+      if (!doctor.is_active) {
+        alert("К сожалению, этот врач в данный момент недоступен для консультаций.");
+        return;
+      }
+    }
+    
     alert("Функционал заявки на консультацию находится в разработке");
   };
   
@@ -123,12 +157,21 @@ function DoctorProfilePage() {
             <div className="mt-4 md:mt-0">
               <div className="bg-primary/10 p-3 rounded-lg text-center">
                 <p className="text-sm text-gray-600">Стоимость консультации</p>
-                <p className="text-2xl font-bold text-primary">{doctor.cost_per_consultation} ₽</p>
+                <p className="text-2xl font-bold text-primary">{doctor.cost_per_consultation.toLocaleString()} UZS</p>
               </div>
             </div>
           </div>
           
           <Divider className="my-4" />
+          
+          {/* Статус доступности */}
+          <div className="mb-4">
+            {doctor.is_active ? (
+              <Chip color="success" variant="flat">Доступен для консультаций</Chip>
+            ) : (
+              <Chip color="danger" variant="flat">Недоступен для консультаций</Chip>
+            )}
+          </div>
           
           {/* Рейтинг */}
           {doctor.rating !== undefined && (
@@ -176,17 +219,38 @@ function DoctorProfilePage() {
               
               {/* Кнопка заявки на консультацию */}
               <div className="mt-6">
-                <Button 
-                  color="primary" 
-                  className="w-full" 
-                  size="lg"
-                  onClick={handleRequestConsultation}
+                <Tooltip 
+                  content={
+                    !user 
+                      ? "Войдите в систему, чтобы записаться на консультацию" 
+                      : user.role !== 'patient' 
+                        ? "Только пациенты могут записываться на консультации" 
+                        : !doctor.is_active 
+                          ? "Врач в данный момент недоступен для консультаций" 
+                          : null
+                  }
+                  isDisabled={canRequestConsultation()}
                 >
-                  Подать заявку на консультацию
-                </Button>
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  После подачи заявки врач свяжется с вами для уточнения деталей и назначения времени консультации.
-                </p>
+                  <div className="w-full">
+                    <Button 
+                      color={doctor.is_active ? "primary" : "default"}
+                      className="w-full" 
+                      size="lg"
+                      onClick={handleRequestConsultation}
+                      isDisabled={!doctor.is_active}
+                    >
+                      {doctor.is_active 
+                        ? "Подать заявку на консультацию" 
+                        : "Консультации временно недоступны"
+                      }
+                    </Button>
+                  </div>
+                </Tooltip>
+                {doctor.is_active && (
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    После подачи заявки врач свяжется с вами для уточнения деталей и назначения времени консультации.
+                  </p>
+                )}
               </div>
             </div>
           </div>

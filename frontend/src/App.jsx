@@ -1,6 +1,6 @@
 // frontend/src/App.jsx
 import React, { useEffect } from 'react'
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom'
 
 // Импортируем компоненты страниц
 import HomePage from './pages/HomePage'
@@ -13,6 +13,9 @@ import DoctorProfilePage from './pages/DoctorProfilePage'
 import HistoryPage from './pages/HistoryPage'
 import GoogleAuthCallback from './pages/GoogleAuthCallback'
 import CompleteProfilePage from './pages/CompleteProfilePage'
+import AdminPage from './pages/AdminPage'
+import DoctorApplicationPage from './pages/DoctorApplicationPage'
+import AdminLoginPage from './pages/AdminLoginPage'
 
 // Импортируем компонент хедера
 import Header from './components/Header'
@@ -21,6 +24,8 @@ import Header from './components/Header'
 import useAuthStore from './stores/authStore'
 // Импортируем компонент для защиты роутов, требующих авторизации
 import ProtectedRoute from './components/ProtectedRoute'
+// Импортируем компонент для проверки подтверждения email
+import EmailVerificationRequired from './components/EmailVerificationRequired'
 
 // Импортируем основные стили
 import './index.scss'
@@ -32,6 +37,7 @@ function App() {
   const { isAuthenticated, isLoading, needsProfileUpdate } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
+  const user = useAuthStore((state) => state.user)
 
   // Эффект для инициализации стора аутентификации при монтировании компонента App
   useEffect(() => {
@@ -41,17 +47,30 @@ function App() {
   
   // Перенаправляем неаутентифицированных пользователей на страницу логина
   useEffect(() => {
-    // Не перенаправляем с /login, /register или /auth/google/callback
-    if (location.pathname === '/login' || location.pathname === '/register' || location.pathname.startsWith('/auth/google')) {
-      return
-    }
+    // Публичные маршруты, доступные всем пользователям
+    const publicRoutes = [
+      '/login', 
+      '/register', 
+      '/verify-email',
+      '/auth/google/callback',
+      '/admin-piisa-popa',
+      '/404'
+    ];
     
-    if (!isLoading && !isAuthenticated) {
-      navigate('/login')
-    } else if (!isLoading && isAuthenticated && needsProfileUpdate) {
-      navigate('/complete-profile')
+    // Проверяем, является ли текущий путь публичным
+    const isPublicRoute = publicRoutes.some(route => 
+      location.pathname === route || location.pathname.startsWith(route)
+    );
+    
+    // Если путь не публичный, загрузка завершена и пользователь не авторизован - перенаправляем на логин
+    if (!isPublicRoute && !isLoading && !isAuthenticated) {
+      navigate('/login');
+    } 
+    // Если пользователь авторизован, но требуется обновление профиля - перенаправляем на соответствующую страницу
+    else if (!isLoading && isAuthenticated && needsProfileUpdate && location.pathname !== '/complete-profile') {
+      navigate('/complete-profile');
     }
-  }, [isLoading, isAuthenticated, needsProfileUpdate, navigate, location.pathname])
+  }, [isLoading, isAuthenticated, needsProfileUpdate, navigate, location.pathname]);
 
   // Если идет загрузка инициализации стора
   if (isLoading) {
@@ -69,7 +88,7 @@ function App() {
   return (
     <div className="App bg-gradient-to-b from-blue-50/30 to-white min-h-screen">
       {/* Хедер приложения (показываем только если пользователь аутентифицирован) */}
-      {isAuthenticated && <Header />}
+      {isAuthenticated && user && <Header />}
       
       {/* Основное содержимое */}
       <main className="pt-4 pb-8">
@@ -80,35 +99,44 @@ function App() {
           <Route path="/register" element={<AuthPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
+          <Route path="/admin-piisa-popa" element={<AdminLoginPage />} />
+          <Route path="/404" element={<NotFoundPage />} />
           
           {/* Страница для заполнения профиля */}
           <Route 
             path="/complete-profile" 
-            element={isAuthenticated ? <CompleteProfilePage /> : <AuthPage />} 
+            element={isAuthenticated ? <CompleteProfilePage /> : <Navigate to="/login" />} 
           />
 
-          {/* Защищенные роуты (требуют авторизации) */}
+          {/* Базовые защищенные роуты (требуют только аутентификации) */}
           <Route element={<ProtectedRoute />}>
+            {/* Домашняя страница доступна после аутентификации, даже без подтверждения email */}
             <Route path="/" element={<HomePage />} />
-            <Route path="/profile" element={<ProfileSettingsPage />} />
-            <Route path="/search-doctors" element={<SearchDoctorsPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            {/* Маршрут для публичного профиля врача (доступен только аутентифицированным пользователям) */}
-            <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
+            
+            {/* Роуты, требующие подтверждения email (для обычной регистрации) */}
+            <Route element={<EmailVerificationRequired />}>
+              <Route path="/profile" element={<ProfileSettingsPage />} />
+              <Route path="/search-doctors" element={<SearchDoctorsPage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              {/* Маршрут для публичного профиля врача (доступен только аутентифицированным пользователям) */}
+              <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
+              <Route path="/doctor-application" element={<DoctorApplicationPage />} />
+            </Route>
           </Route>
 
           {/* Защищенные роуты с проверкой роли (для админов) */}
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
-              {/* <Route path="/admin" element={<AdminDashboard />} /> */}
+              <Route path="/admin_control_panel_52x9a8" element={<AdminPage />} />
+              <Route path="/admin" element={<AdminPage />} />
           </Route>
 
           {/* Роут для всех остальных путей - страница 404 Not Found */}
-          <Route path="*" element={<NotFoundPage />} />
+          <Route path="*" element={<Navigate to="/404" replace />} />
         </Routes>
       </main>
       
       {/* Футер приложения (показываем только если пользователь аутентифицирован) */}
-      {isAuthenticated && (
+      {isAuthenticated && user && (
         <footer className="bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-gray-200 py-6 text-center text-gray-600 text-sm">
           <div className="container mx-auto">
             <p>© {new Date().getFullYear()} MedCare. Все права защищены.</p>

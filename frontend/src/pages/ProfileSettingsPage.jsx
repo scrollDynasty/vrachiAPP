@@ -1,6 +1,7 @@
 // frontend/src/pages/ProfileSettingsPage.jsx
 import React, { useEffect, useState } from 'react';
 // import { useNavigate } from 'react-router-dom'; // Для перенаправления (если нужно)
+import { Link } from 'react-router-dom'; // Импортируем для ссылки на страницу подачи заявки
 import api from '../api'; // Импортируем наш API сервис
 import useAuthStore from '../stores/authStore'; // Импортируем стор для получения данных пользователя
 
@@ -25,14 +26,16 @@ function ProfileSettingsPage() {
   const [error, setError] = useState(null); // Сообщение об ошибке (загрузки или сохранения)
   const [saveSuccess, setSaveSuccess] = useState(false); // Флаг успешного сохранения (для сообщения)
   const [isSaving, setIsSaving] = useState(false); // Флаг процесса сохранения (для индикатора на кнопке формы)
+  const [isCreatingFromRegistration, setIsCreatingFromRegistration] = useState(false);
 
 
   // Получаем данные текущего пользователя (включая роль) из стора аутентификации
   const { user, isAuthenticated } = useAuthStore();
+  const createOrUpdatePatientProfile = useAuthStore((state) => state.createOrUpdatePatientProfile);
+  const parseProfileFromRegistration = useAuthStore((state) => state.parseProfileFromRegistration);
   // const setUser = useAuthStore((state) => state.setUser); // Функция для обновления пользователя в сторе (если понадобится)
 
 
-  // --- Логика загрузки профиля ---
   // Эффект выполняется при монтировании компонента и при изменении user.id/isAuthenticated
   useEffect(() => {
     // Проверяем, что пользователь авторизован и объект user доступен.
@@ -66,6 +69,38 @@ function ProfileSettingsPage() {
         if (err.response && err.response.status === 404) {
             setError("Профиль еще не создан. Пожалуйста, заполните информацию."); // Специальное сообщение для 404
             setProfileData(null); // Убеждаемся, что profileData null, если профиль не найден
+            
+            // Проверяем, есть ли сохраненные данные профиля из регистрации
+            if (user.role === 'patient' && !isCreatingFromRegistration) {
+              const registrationData = parseProfileFromRegistration();
+              if (registrationData) {
+                // Если есть данные регистрации, создаем профиль автоматически
+                setIsCreatingFromRegistration(true);
+                console.log('Найдены данные регистрации, автоматически создаем профиль', registrationData);
+                
+                createOrUpdatePatientProfile(registrationData)
+                  .then(response => {
+                    if (response) {
+                      console.log('Профиль успешно создан из данных регистрации:', response);
+                      setProfileData(response);
+                      setError(null);
+                      setSaveSuccess(true);
+                      
+                      // Удаляем данные регистрации после успешного создания профиля
+                      localStorage.removeItem('vrach_registration_profile');
+                      
+                      // Скрываем сообщение об успехе через 3 секунды
+                      setTimeout(() => setSaveSuccess(false), 3000);
+                    }
+                  })
+                  .catch(error => {
+                    console.error('Ошибка при создании профиля из данных регистрации:', error);
+                  })
+                  .finally(() => {
+                    setIsCreatingFromRegistration(false);
+                  });
+              }
+            }
         } else {
             setError("Ошибка при загрузке профиля. Попробуйте позже."); // Общее сообщение для других ошибок
             setProfileData(null);
@@ -80,7 +115,7 @@ function ProfileSettingsPage() {
     fetchProfile();
 
     // Зависимости: эффект запускается при монтировании и при изменении user?.id или isAuthenticated.
-  }, [user?.id, isAuthenticated]); // Используем user?.id для безопасного доступа
+  }, [user?.id, isAuthenticated, parseProfileFromRegistration, createOrUpdatePatientProfile]);
 
 
   // --- Логика сохранения профиля (общая для Пациента и Врача) ---
@@ -150,10 +185,10 @@ function ProfileSettingsPage() {
   // Сообщение "Профиль еще не создан" обрабатывается ниже, отображением формы.
   if (error && error !== "Профиль еще не создан. Пожалуйста, заполните информацию.") {
        return (
-         <div className="py-8 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[calc(100vh-100px)]">
+         <div className="py-12 px-6 sm:px-8 lg:px-10 bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[calc(100vh-100px)]">
            <div className="max-w-4xl mx-auto">
-             <div className="text-center mb-8">
-               <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 mb-2">
+             <div className="text-center mb-10">
+               <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 mb-3">
                  Мой профиль
                </h1>
                <p className="text-gray-600">Управляйте личными данными и настройками</p>
@@ -162,7 +197,7 @@ function ProfileSettingsPage() {
              <Card className="shadow-lg border-none overflow-hidden mb-6">
                <div className="h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
                
-               <CardHeader className="flex justify-between items-center gap-3 p-6 bg-gradient-to-b from-indigo-50 to-transparent">
+               <CardHeader className="flex justify-between items-center gap-3 p-8 bg-gradient-to-b from-indigo-50 to-transparent">
                  <div className="flex items-center gap-4">
                    <Avatar 
                      src={user?.profile_image || undefined}
@@ -182,8 +217,8 @@ function ProfileSettingsPage() {
                
                <Divider />
                
-               <CardBody className="p-6">
-                 <div className="mb-6 bg-danger-50 text-danger p-4 rounded-lg border border-danger-200">
+               <CardBody className="p-8">
+                 <div className="mb-6 bg-danger-50 text-danger p-5 rounded-lg border border-danger-200">
                    <div className="flex items-center">
                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -193,7 +228,7 @@ function ProfileSettingsPage() {
                  </div>
 
                  {profileData === null && error === "Профиль еще не создан. Пожалуйста, заполните информацию." && (
-                   <div className="mb-6 bg-blue-50 text-blue-700 p-4 rounded-lg border border-blue-200">
+                   <div className="mb-6 bg-blue-50 text-blue-700 p-5 rounded-lg border border-blue-200">
                      <div className="flex items-center">
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -203,7 +238,7 @@ function ProfileSettingsPage() {
                    </div>
                  )}
                  
-                 <div className="bg-white rounded-lg p-6 shadow-sm">
+                 <div className="bg-white rounded-lg p-8 shadow-sm">
                    {user.role === 'patient' && (
                      <PatientProfileForm
                        profile={profileData}
@@ -246,21 +281,19 @@ function ProfileSettingsPage() {
   // Основной UI страницы настроек профиля (после успешной загрузки или если профиль не создан)
   return (
     // Используем контейнер MUI Container для центрирования формы
-    <div className="py-8 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[calc(100vh-100px)]">
+    <div className="py-12 px-6 sm:px-8 lg:px-10 bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[calc(100vh-100px)]">
       <div className="max-w-4xl mx-auto">
-        {/* Заголовок страницы с анимацией */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 mb-2">
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 mb-3">
             Мой профиль
           </h1>
           <p className="text-gray-600">Управляйте личными данными и настройками</p>
         </div>
         
-        {/* Основная карточка профиля */}
         <Card className="shadow-lg border-none overflow-hidden mb-6">
           <div className="h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
           
-          <CardHeader className="flex justify-between items-center gap-3 p-6 bg-gradient-to-b from-indigo-50 to-transparent">
+          <CardHeader className="flex justify-between items-center gap-3 p-8 bg-gradient-to-b from-indigo-50 to-transparent">
             <div className="flex items-center gap-4">
               <Avatar 
                 src={user?.profile_image || undefined}
@@ -272,18 +305,44 @@ function ProfileSettingsPage() {
                 <h2 className="text-xl font-semibold">{profileData?.full_name || user?.email || "Пользователь"}</h2>
                 <p className="text-sm text-gray-500">
                   {user?.role === 'patient' ? 'Пациент' : 
-                   user?.role === 'doctor' ? 'Врач' : 'Пользователь'}
+                   user?.role === 'doctor' ? 'Врач' : 
+                   user?.role === 'admin' ? 'Администратор' : 'Пользователь'}
                 </p>
               </div>
             </div>
+            
+            {/* Кнопка для подачи заявки на роль врача (только для пациентов) */}
+            {user?.role === 'patient' && (
+              <Link to="/doctor-application">
+                <Button 
+                  color="primary" 
+                  variant="flat"
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white"
+                >
+                  Подать заявку на роль врача
+                </Button>
+              </Link>
+            )}
+            
+            {/* Ссылка на админ-панель (только для админов) */}
+            {user?.role === 'admin' && (
+              <Link to="/admin_control_panel_52x9a8">
+                <Button 
+                  color="secondary" 
+                  variant="flat"
+                >
+                  Перейти в админ-панель
+                </Button>
+              </Link>
+            )}
           </CardHeader>
           
           <Divider />
           
-          <CardBody className="p-6">
+          <CardBody className="p-8">
             {/* Вывод сообщений */}
             {saveSuccess && (
-              <div className="mb-6 bg-green-50 text-green-700 p-4 rounded-lg border border-green-200 animate-pulse">
+              <div className="mb-6 bg-green-50 text-green-700 p-5 rounded-lg border border-green-200 animate-pulse">
                 <div className="flex items-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -294,7 +353,7 @@ function ProfileSettingsPage() {
             )}
             
             {error && error !== "Профиль еще не создан. Пожалуйста, заполните информацию." && (
-              <div className="mb-6 bg-danger-50 text-danger p-4 rounded-lg border border-danger-200">
+              <div className="mb-6 bg-danger-50 text-danger p-5 rounded-lg border border-danger-200">
                 <div className="flex items-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -305,7 +364,7 @@ function ProfileSettingsPage() {
             )}
 
             {profileData === null && error === "Профиль еще не создан. Пожалуйста, заполните информацию." && (
-              <div className="mb-6 bg-blue-50 text-blue-700 p-4 rounded-lg border border-blue-200">
+              <div className="mb-6 bg-blue-50 text-blue-700 p-5 rounded-lg border border-blue-200">
                 <div className="flex items-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -316,7 +375,7 @@ function ProfileSettingsPage() {
             )}
             
             {/* Формы профиля */}
-            <div className="bg-white rounded-lg p-6 shadow-sm">
+            <div className="bg-white rounded-lg p-8 shadow-sm">
               {user.role === 'patient' && (
                 <PatientProfileForm
                   profile={profileData}

@@ -25,17 +25,15 @@ function ProtectedRoute({ allowedRoles }) {
   }
 
   // После завершения загрузки:
-  // Если пользователь не аутентифицирован
-  if (!isAuthenticated) {
-    console.log("ProtectedRoute: User not authenticated, redirecting to login");
+  // Если пользователь не аутентифицирован или объект пользователя отсутствует
+  if (!isAuthenticated || !user) {
     // Перенаправляем на страницу логина.
     // 'replace' заменяет текущую запись в истории браузера, чтобы пользователь не мог вернуться на защищенную страницу кнопкой "Назад".
     return <Navigate to="/login" replace />;
   }
 
   // Проверяем, заполнен ли профиль пользователя (особенно после Google OAuth)
-  if (needsProfileUpdate || !user.role || !user.is_active) {
-    console.log("ProtectedRoute: User needs to complete profile, redirecting to profile form");
+  if (needsProfileUpdate) {
     return <Navigate to="/complete-profile" replace />;
   }
 
@@ -44,8 +42,7 @@ function ProtectedRoute({ allowedRoles }) {
   if (allowedRoles && allowedRoles.length > 0) {
     // Проверяем, существует ли объект пользователя (он должен быть, если isAuthenticated true)
     // и входит ли его роль в массив разрешенных ролей allowedRoles.
-    if (!user || !allowedRoles.includes(user.role)) {
-      console.log(`ProtectedRoute: User role '${user?.role}' not in allowed roles: ${allowedRoles.join(', ')}`);
+    if (!user.role || !allowedRoles.includes(user.role)) {
       // Если роль не соответствует, показываем сообщение об ошибке доступа (403 Forbidden)
       return (
         <div className="flex justify-center items-center min-h-screen bg-gray-50">
@@ -74,7 +71,6 @@ function ProtectedRoute({ allowedRoles }) {
   // Если пользователь аутентифицирован и соответствует всем требованиям к роли (если они были указаны),
   // рендерим содержимое дочернего роута (с помощью компонента <Outlet /> из react-router-dom).
   // <Outlet /> используется, когда ProtectedRoute оборачивает группу вложенных <Route> в родительском компоненте (например, App.jsx).
-   console.log("ProtectedRoute: Access granted, rendering content.");
   return <Outlet />;
 }
 

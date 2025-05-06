@@ -2,7 +2,8 @@
 
 import os
 import uuid # Импортируем uuid для генерации токенов
-from fastapi import FastAPI, Depends, HTTPException, status, APIRouter, BackgroundTasks, Query # Добавляем BackgroundTasks для фоновых задач и Query для поиска
+import shutil # Добавляем для работы с файлами
+from fastapi import FastAPI, Depends, HTTPException, status, APIRouter, BackgroundTasks, Query, File, UploadFile, Form # Добавляем BackgroundTasks для фоновых задач и Query для поиска
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer # Добавляем OAuth2PasswordRequestForm и OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Optional, Union
@@ -13,15 +14,17 @@ from email.mime.text import MIMEText  # Для создания email
 from email.mime.multipart import MIMEMultipart  # Для создания составных email
 from math import ceil
 from pydantic import BaseModel  # Для моделей данных
+from fastapi.staticfiles import StaticFiles # Для раздачи статических файлов
+import secrets
 
 # Импортируем наши модели и функцию для получения сессии БД
-from models import User, PatientProfile, DoctorProfile, get_db, DATABASE_URL, engine, Base # Добавляем модели профилей
+from models import User, PatientProfile, DoctorProfile, get_db, DATABASE_URL, engine, Base, DoctorApplication, SessionLocal # Добавляем SessionLocal
 # Импортируем функции для работы с паролями и JWT, а также зависимости для аутентификации и ролей
 # get_current_user и require_role используются как зависимости в эндпоинтах
 from auth import get_password_hash, verify_password, create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, require_role, authenticate_user, get_current_active_user, SECURE_TOKEN_LENGTH, Token as TokenModel, verify_google_token, authenticate_google_user
 
 # Импортируем pydantic модели для валидации данных запросов и ответов
-from schemas import UserCreate, UserResponse, Token, PatientProfileCreateUpdate, PatientProfileResponse, DoctorProfileCreateUpdate, DoctorProfileResponse, Field, DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse # Импортируем Field (хотя он нужен только в schemas.py), DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse
+from schemas import UserCreate, UserResponse, Token, PatientProfileCreateUpdate, PatientProfileResponse, DoctorProfileCreateUpdate, DoctorProfileResponse, Field, DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse, DoctorApplicationCreate, DoctorApplicationResponse, DoctorApplicationProcessRequest, DoctorApplicationListResponse # Импортируем Field (хотя он нужен только в schemas.py), DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse
 
 
 # Для загрузки .env файла (важно вызвать где-то в начале приложения, лучше в auth.py)
@@ -30,6 +33,21 @@ from dotenv import load_dotenv
 # В данном случае он вызывается и в models.py и в auth.py.
 # Можно вызвать явно здесь, если уверены, что он не вызывается в импортируемых модулях:
 load_dotenv()
+
+# Создаем директорию для загрузки файлов, если она еще не существует
+UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+# Создаем поддиректории для разных типов файлов
+PHOTO_DIR = os.path.join(UPLOAD_DIR, "photos")
+DIPLOMA_DIR = os.path.join(UPLOAD_DIR, "diplomas")
+LICENSE_DIR = os.path.join(UPLOAD_DIR, "licenses")
+
+# Создаем директории, если они еще не существуют
+for directory in [PHOTO_DIR, DIPLOMA_DIR, LICENSE_DIR]:
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 
 # Определяем базовый URL для подтверждения email (адрес страницы фронтенда, куда пользователь перейдет по ссылке из письма)
@@ -61,6 +79,25 @@ except Exception as e:
     # Можно также решить, стоит ли останавливать приложение, если БД недоступна при старте.
     # Для разработки можно просто вывести ошибку, для продакшена, возможно, лучше остановить.
 
+# Создаем администратора при первом запуске приложения (если его еще нет)
+try:
+    with SessionLocal() as db:
+        admin_exists = db.query(User).filter(User.role == "admin").first()
+        if not admin_exists:
+            # Создаем первого админа с дефолтным логином и паролем
+            admin_password = get_password_hash("admin")
+            admin_user = User(
+                email="admin@medcare.com",
+                hashed_password=admin_password,
+                is_active=True,
+                role="admin"
+            )
+            db.add(admin_user)
+            db.commit()
+            print("Администратор по умолчанию создан: admin@medcare.com / admin")
+except Exception as e:
+    print(f"Error creating default admin: {e}")
+
 
 app = FastAPI() # Создаем экземпляр FastAPI приложения
 origins = [
@@ -79,6 +116,8 @@ app.add_middleware(
     allow_headers=["*"], # Разрешаем все заголовки в запросах (включая Authorization)
 )
 
+# Монтируем StaticFiles для доступа к загруженным файлам
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Dependency для получения сессии базы данных. Используется в роутах для взаимодействия с БД.
 # Annotated - современный способ указания типа и зависимости.
@@ -728,3 +767,483 @@ async def get_districts():
         "Яшнабадский район"
     ]
     return districts
+
+# --- Роуты для заявок на роль врача ---
+
+# Эндпоинт для подачи заявки на роль врача
+@app.post("/doctor-applications", response_model=DoctorApplicationResponse, status_code=status.HTTP_201_CREATED)
+async def create_doctor_application(
+    full_name: str = Form(...),
+    specialization: str = Form(...),
+    experience: str = Form(...),
+    education: str = Form(...),
+    license_number: str = Form(...),
+    additional_info: Optional[str] = Form(None),
+    photo: Optional[UploadFile] = File(None),
+    diploma: Optional[UploadFile] = File(None),
+    license_doc: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Создает новую заявку на получение роли врача.
+    
+    Args:
+        form_data: Данные формы заявки
+        photo: Фото врача
+        diploma: Скан диплома
+        license_doc: Скан лицензии
+        db: Сессия базы данных
+        current_user: Текущий пользователь
+        
+    Returns:
+        DoctorApplicationResponse: Данные созданной заявки
+    """
+    # Проверяем, что пользователь не является уже врачом
+    if current_user.role == "doctor":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У вас уже есть роль врача"
+        )
+    
+    # Проверяем, нет ли уже ожидающей заявки от этого пользователя
+    existing_application = db.query(DoctorApplication).filter(
+        DoctorApplication.user_id == current_user.id,
+        DoctorApplication.status == "pending"
+    ).first()
+    
+    if existing_application:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У вас уже есть ожидающая рассмотрения заявка"
+        )
+    
+    # Создаем новую заявку
+    new_application = DoctorApplication(
+        user_id=current_user.id,
+        full_name=full_name,
+        specialization=specialization,
+        experience=experience,
+        education=education,
+        license_number=license_number,
+        additional_info=additional_info
+    )
+    
+    # Обрабатываем загруженные файлы
+    if photo:
+        file_extension = os.path.splitext(photo.filename)[1]
+        filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(PHOTO_DIR, filename)
+        
+        # Сохраняем файл
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+        
+        new_application.photo_path = f"/uploads/photos/{filename}"
+    
+    if diploma:
+        file_extension = os.path.splitext(diploma.filename)[1]
+        filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(DIPLOMA_DIR, filename)
+        
+        # Сохраняем файл
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(diploma.file, buffer)
+        
+        new_application.diploma_path = f"/uploads/diplomas/{filename}"
+    
+    if license_doc:
+        file_extension = os.path.splitext(license_doc.filename)[1]
+        filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(LICENSE_DIR, filename)
+        
+        # Сохраняем файл
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(license_doc.file, buffer)
+        
+        new_application.license_path = f"/uploads/licenses/{filename}"
+    
+    # Сохраняем заявку в базе данных
+    db.add(new_application)
+    db.commit()
+    db.refresh(new_application)
+    
+    return new_application
+
+
+# Эндпоинт для получения заявок пользователя
+@app.get("/users/me/doctor-applications", response_model=List[DoctorApplicationResponse])
+async def get_my_doctor_applications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает список заявок на роль врача текущего пользователя.
+    
+    Args:
+        db: Сессия базы данных
+        current_user: Текущий пользователь
+        
+    Returns:
+        List[DoctorApplicationResponse]: Список заявок
+    """
+    applications = db.query(DoctorApplication).filter(
+        DoctorApplication.user_id == current_user.id
+    ).order_by(DoctorApplication.created_at.desc()).all()
+    
+    return applications
+
+
+# Эндпоинт для получения списка всех заявок (для администраторов)
+@app.get("/admin/doctor-applications", response_model=DoctorApplicationListResponse)
+async def get_all_doctor_applications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+    status: Optional[str] = Query(None, description="Фильтр по статусу заявки: pending, approved, rejected"),
+    page: int = Query(1, description="Номер страницы", ge=1),
+    size: int = Query(10, description="Размер страницы", ge=1, le=100)
+):
+    """
+    Получает список всех заявок на роль врача (для администраторов).
+    
+    Args:
+        status: Фильтр по статусу заявки
+        page: Номер страницы для пагинации
+        size: Размер страницы для пагинации
+        db: Сессия базы данных
+        current_user: Текущий пользователь (администратор)
+        
+    Returns:
+        DoctorApplicationListResponse: Список заявок с пагинацией
+    """
+    # Создаем базовый запрос
+    query = db.query(DoctorApplication)
+    
+    # Применяем фильтры, если они указаны
+    if status:
+        query = query.filter(DoctorApplication.status == status)
+    
+    # Получаем общее количество заявок
+    total = query.count()
+    
+    # Вычисляем общее количество страниц
+    pages = ceil(total / size) if total > 0 else 1
+    
+    # Применяем пагинацию
+    query = query.order_by(DoctorApplication.created_at.desc())
+    query = query.offset((page - 1) * size).limit(size)
+    
+    # Получаем заявки
+    applications = query.all()
+    
+    # Формируем ответ
+    return {
+        "items": applications,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages
+    }
+
+
+# Эндпоинт для обработки заявки администратором
+@app.put("/admin/doctor-applications/{application_id}", response_model=DoctorApplicationResponse)
+async def process_doctor_application(
+    application_id: int,
+    application_data: DoctorApplicationProcessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin"))
+):
+    """
+    Обрабатывает заявку на роль врача (одобрение или отклонение).
+    
+    Args:
+        application_id: ID заявки
+        application_data: Данные обработки заявки
+        db: Сессия базы данных
+        current_user: Текущий пользователь (администратор)
+        
+    Returns:
+        DoctorApplicationResponse: Обновленные данные заявки
+    """
+    # Получаем заявку
+    application = db.query(DoctorApplication).filter(DoctorApplication.id == application_id).first()
+    
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Заявка не найдена"
+        )
+    
+    # Проверяем, не обработана ли уже заявка
+    if application.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Заявка уже обработана со статусом {application.status}"
+        )
+    
+    # Обновляем статус заявки
+    application.status = application_data.status
+    application.admin_comment = application_data.admin_comment
+    application.processed_at = datetime.utcnow()
+    
+    # Если заявка одобрена, обновляем роль пользователя на "doctor"
+    if application_data.status == "approved":
+        user = db.query(User).filter(User.id == application.user_id).first()
+        if user:
+            user.role = "doctor"
+            
+            # Создаем профиль врача, если его еще нет
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+            if not doctor_profile:
+                doctor_profile = DoctorProfile(
+                    user_id=user.id,
+                    full_name=application.full_name,
+                    specialization=application.specialization,
+                    experience=application.experience,
+                    education=application.education,
+                    cost_per_consultation=1000,  # Значение по умолчанию
+                    is_verified=True
+                )
+                db.add(doctor_profile)
+    
+    db.commit()
+    db.refresh(application)
+    
+    return application
+
+# Эндпоинт для создания админа с заданным логином и паролем
+@app.post("/setup_admin_m5kL9sP2q7", status_code=status.HTTP_201_CREATED)
+async def create_admin_user(
+    email: str,
+    password: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Создает нового администратора с указанными email и паролем.
+    Этот эндпоинт должен использоваться только при начальной настройке системы.
+    В продакшене его следует отключить.
+    """
+    # Проверяем режим работы приложения - эндпоинт доступен только в режиме разработки
+    ENV = os.getenv("APP_ENV", "development")
+    if ENV != "development":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Этот эндпоинт доступен только в режиме разработки"
+        )
+    
+    # Проверяем, есть ли уже пользователь с таким email
+    existing_user = db.query(User).filter(User.email == email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Пользователь с email {email} уже существует"
+        )
+    
+    # Создаем нового админа
+    hashed_password = get_password_hash(password)
+    admin_user = User(
+        email=email,
+        hashed_password=hashed_password,
+        is_active=True,
+        role="admin"
+    )
+    
+    db.add(admin_user)
+    db.commit()
+    db.refresh(admin_user)
+    
+    return {"message": f"Администратор {email} успешно создан"}
+
+# Эндпоинт для получения списка всех пользователей (для админов)
+@app.get("/admin/users", response_model=List[UserResponse])
+async def get_all_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+    page: int = Query(1, description="Номер страницы", ge=1),
+    size: int = Query(10, description="Размер страницы", ge=1, le=100)
+):
+    """
+    Получает список всех пользователей (для администраторов).
+    
+    Args:
+        page: Номер страницы для пагинации
+        size: Размер страницы для пагинации
+        db: Сессия базы данных
+        current_user: Текущий пользователь (администратор)
+        
+    Returns:
+        List[UserResponse]: Список пользователей
+    """
+    # Получаем всех пользователей с пагинацией
+    users = db.query(User).order_by(User.id).offset((page - 1) * size).limit(size).all()
+    
+    return users
+
+# Эндпоинт для получения профиля пользователя по ID (для админов)
+@app.get("/admin/users/{user_id}/profile", response_model=Union[PatientProfileResponse, DoctorProfileResponse, dict])
+async def get_user_profile_by_id(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin"))
+):
+    """
+    Получает профиль любого пользователя по ID (для администраторов).
+    
+    Args:
+        user_id: ID пользователя
+        db: Сессия базы данных
+        current_user: Текущий пользователь (администратор)
+        
+    Returns:
+        Union[PatientProfileResponse, DoctorProfileResponse, dict]: Профиль пользователя
+    """
+    # Проверяем, существует ли пользователь
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден"
+        )
+    
+    # В зависимости от роли пользователя, получаем соответствующий профиль
+    if user.role == "patient":
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+        if not profile:
+            return {"message": "Профиль пациента не найден", "user_role": "patient", "user_email": user.email}
+        return profile
+    
+    elif user.role == "doctor":
+        profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+        if not profile:
+            return {"message": "Профиль врача не найден", "user_role": "doctor", "user_email": user.email}
+        return profile
+    
+    else:
+        return {"message": "У данного пользователя нет профиля", "user_role": user.role, "user_email": user.email}
+
+# Модель для изменения роли пользователя
+class ChangeUserRoleRequest(BaseModel):
+    role: str = Field(..., description="Новая роль пользователя")
+
+# Эндпоинт для изменения роли пользователя (для админов)
+@app.put("/admin/users/{user_id}/role", response_model=UserResponse)
+async def change_user_role(
+    user_id: int,
+    role_data: ChangeUserRoleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin"))
+):
+    """
+    Изменяет роль пользователя (для администраторов).
+    
+    Args:
+        user_id: ID пользователя
+        role_data: Данные с новой ролью
+        db: Сессия базы данных
+        current_user: Текущий пользователь (администратор)
+        
+    Returns:
+        UserResponse: Обновленные данные пользователя
+    """
+    # Проверяем, существует ли пользователь
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден"
+        )
+    
+    # Проверяем, что роль допустима
+    valid_roles = ["patient", "doctor", "admin"]
+    if role_data.role not in valid_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Недопустимая роль. Допустимые роли: {', '.join(valid_roles)}"
+        )
+    
+    # Проверяем текущую роль пользователя
+    old_role = user.role
+    
+    # Изменяем роль пользователя
+    user.role = role_data.role
+    
+    # Обрабатываем изменение роли с doctor на другую
+    if old_role == "doctor" and role_data.role != "doctor":
+        # Деактивируем профиль врача, но не удаляем его
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+        if doctor_profile:
+            doctor_profile.is_active = False
+    
+    # Обрабатываем изменение роли с другой на doctor
+    if old_role != "doctor" and role_data.role == "doctor":
+        # Проверяем, существует ли профиль врача
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+        if doctor_profile:
+            # Активируем профиль врача
+            doctor_profile.is_active = True
+        else:
+            # Создаем пустой профиль врача, но с флагом неактивного
+            # Врач должен будет заполнить профиль самостоятельно
+            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+            
+            doctor_profile = DoctorProfile(
+                user_id=user.id,
+                full_name=patient_profile.full_name if patient_profile else None,
+                specialization="Общая практика",  # Значение по умолчанию
+                cost_per_consultation=1000,  # Значение по умолчанию
+                is_active=True,
+                is_verified=False
+            )
+            db.add(doctor_profile)
+    
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+# --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПОВТОРНОЙ ОТПРАВКИ ПИСЬМА ПОДТВЕРЖДЕНИЯ ---
+@app.post("/resend-verification")
+def resend_verification_email(email_data: dict, db: DbDependency, background_tasks: BackgroundTasks):
+    """
+    Повторная отправка письма с подтверждением email.
+    Генерирует новый токен и отправляет новое письмо с ссылкой активации.
+    
+    Args:
+        email_data (dict): Словарь с email пользователя.
+        db (Session): Сессия базы данных.
+        background_tasks (BackgroundTasks): Объект для выполнения задач в фоновом режиме.
+        
+    Returns:
+        dict: Сообщение об успешной отправке письма или ошибка.
+    """
+    email = email_data.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email не указан"
+        )
+    
+    # Ищем пользователя в базе данных
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Для безопасности не сообщаем, что пользователя не существует
+        return {"message": "Если этот email зарегистрирован в системе, на него будет отправлено письмо с инструкциями."}
+    
+    # Если пользователь уже активирован, сообщаем об этом
+    if user.is_active:
+        return {"message": "Ваш email уже подтвержден. Вы можете войти в систему."}
+    
+    # Генерируем новый токен для подтверждения email
+    verification_token = secrets.token_urlsafe(32)
+    token_created_at = datetime.utcnow()
+    
+    # Обновляем токен в базе данных
+    user.email_verification_token = verification_token
+    user.email_verification_token_created_at = token_created_at
+    db.commit()
+    
+    # Отправляем письмо с подтверждением email в фоновом режиме
+    background_tasks.add_task(send_verification_email, user.email, verification_token)
+    
+    return {"message": "Новое письмо с инструкциями для подтверждения email отправлено."}

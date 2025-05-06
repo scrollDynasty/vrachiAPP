@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List # Добавляем List, может понадобиться позже для списков
+from datetime import datetime
 
 
 # --- Pydantic модели для базовых пользователей и аутентификации ---
@@ -44,8 +45,8 @@ class PatientProfileCreateUpdate(BaseModel):
     full_name: Optional[str] = Field(None, max_length=255)
     contact_phone: Optional[str] = Field(None, max_length=50)
     contact_address: Optional[str] = Field(None, max_length=255)
-    # TODO: Добавить поля для медицинской информации, если они будут собираться (с учетом приватности)
-    # medical_info: Optional[str] = None # Пример
+    district: Optional[str] = Field(None, max_length=255)
+    medical_info: Optional[str] = None
 
 
 # Модель для данных, возвращаемых при запросе профиля Пациента
@@ -55,7 +56,8 @@ class PatientProfileResponse(BaseModel):
     full_name: Optional[str] = None
     contact_phone: Optional[str] = None
     contact_address: Optional[str] = None
-    # TODO: Добавить поля для медицинской информации, если они будут собираться
+    district: Optional[str] = None
+    medical_info: Optional[str] = None
 
     # Настройка для работы с SQLAlchemy ORM
     class Config:
@@ -89,6 +91,56 @@ class DoctorProfileResponse(BaseModel):
     # Настройка для работы с SQLAlchemy ORM
     class Config:
         from_attributes = True
+
+
+# --- Pydantic модели для заявок на роль врача ---
+
+# Модель для создания заявки на роль врача
+class DoctorApplicationCreate(BaseModel):
+    full_name: str = Field(..., max_length=255)
+    specialization: str = Field(..., max_length=255)
+    experience: str = Field(..., max_length=255)
+    education: str = Field(..., max_length=1000)
+    license_number: str = Field(..., max_length=255)
+    additional_info: Optional[str] = Field(None, max_length=2000)
+    # Пути к файлам будут добавлены отдельно после успешной загрузки
+
+
+# Модель для ответа с данными заявки
+class DoctorApplicationResponse(BaseModel):
+    id: int
+    user_id: int
+    full_name: str
+    specialization: str
+    experience: str
+    education: str
+    license_number: str
+    photo_path: Optional[str] = None
+    diploma_path: Optional[str] = None
+    license_path: Optional[str] = None
+    additional_info: Optional[str] = None
+    status: str
+    admin_comment: Optional[str] = None
+    created_at: datetime
+    processed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Модель для администратора при обработке заявки
+class DoctorApplicationProcessRequest(BaseModel):
+    status: str = Field(..., pattern="^(approved|rejected)$")
+    admin_comment: Optional[str] = Field(None, max_length=1000)
+
+
+# Модель для списка заявок с пагинацией
+class DoctorApplicationListResponse(BaseModel):
+    items: List[DoctorApplicationResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
 
 
 # --- Pydantic модели для поиска и фильтрации врачей ---
