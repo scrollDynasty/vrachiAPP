@@ -1,6 +1,19 @@
 // frontend/src/components/PatientProfileForm.jsx
-import React, { useState, useEffect } from 'react';
-import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem } from '@nextui-org/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem, Avatar } from '@nextui-org/react';
+import { motion } from 'framer-motion';
+import { toast } from 'react-toastify';
+
+// Анимационные варианты для элементов
+const fadeIn = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.4 } }
+};
+
+const slideUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } }
+};
 
 // Компонент формы для профиля Пациента
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Пациента.
@@ -9,33 +22,26 @@ import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, Modal
 // - onSave: Функция, которая будет вызвана при отправке формы с данными профиля.
 // - isLoading: Флаг, указывающий, идет ли процесс сохранения (передается из родительского компонента).
 // - error: Сообщение об ошибке сохранения (передается из родительского компонента).
-function PatientProfileForm({ profile, onSave, isLoading, error }) {
+const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
+   // Состояния для полей формы
    const [full_name, setFullName] = useState('');
    const [contact_phone, setContactPhone] = useState('');
    const [contact_address, setContactAddress] = useState('');
    const [district, setDistrict] = useState('');
    const [medicalInfo, setMedicalInfo] = useState('');
-   const [formLocalError, setFormLocalError] = useState(null);
-   const [profileImage, setProfileImage] = useState('');
-   const [isEditing, setIsEditing] = useState(false);
+
+   // Состояния для UI
+   const [formLocalError, setFormLocalError] = useState(null); // Локальные ошибки валидации формы
+   const [isEditing, setIsEditing] = useState(false); // Флаг режима редактирования
+
+   // Состояние для загрузки изображения профиля
+   const [profileImage, setProfileImage] = useState(null);
+   const [isUploading, setIsUploading] = useState(false);
+   const avatarInputRef = useRef(null);
    
-   // Список районов Ташкента
-   const districts = [
-     { value: "Алмазарский район", label: "Алмазарский район" },
-     { value: "Бектемирский район", label: "Бектемирский район" },
-     { value: "Мирабадский район", label: "Мирабадский район" },
-     { value: "Мирзо-Улугбекский район", label: "Мирзо-Улугбекский район" },
-     { value: "Сергелийский район", label: "Сергелийский район" },
-     { value: "Учтепинский район", label: "Учтепинский район" },
-     { value: "Чиланзарский район", label: "Чиланзарский район" },
-     { value: "Шайхантаурский район", label: "Шайхантаурский район" },
-     { value: "Юнусабадский район", label: "Юнусабадский район" },
-     { value: "Яккасарайский район", label: "Яккасарайский район" },
-     { value: "Яшнабадский район", label: "Яшнабадский район" }
-   ];
-   
-   // Состояние для модальных окон
+   // Модальные окна для различных действий
    const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
+   const [isPrivacyModalOpen, setPrivacyModalOpen] = useState(false);
    const [isNotificationsModalOpen, setNotificationsModalOpen] = useState(false);
    const [isDeleteAccountModalOpen, setDeleteAccountModalOpen] = useState(false);
    
@@ -61,7 +67,7 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
          
          // Проверка метода авторизации (для демонстрации, в реальности нужно получать из профиля)
          // В реальном приложении эта информация должна приходить с бэкенда
-         setIsGoogleAccount(profile.isGoogleAccount || false);
+         setIsGoogleAccount(profile.auth_provider === "google");
          
          // Если профиль существует, не включаем режим редактирования по умолчанию
          setIsEditing(false);
@@ -129,12 +135,18 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
    };
    
    // Обработчик изменения пароля
-   const handlePasswordChange = (e) => {
-      e.preventDefault();
+   const handleChangePassword = (event) => {
+      event.preventDefault();
       setPasswordError(null);
       
-      if (!isGoogleAccount && !currentPassword) {
-         setPasswordError("Введите текущий пароль");
+      // Валидация
+      if (!currentPassword) {
+         setPasswordError("Пожалуйста, введите текущий пароль");
+         return;
+      }
+      
+      if (!newPassword) {
+         setPasswordError("Пожалуйста, введите новый пароль");
          return;
       }
       
@@ -148,292 +160,346 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
          return;
       }
       
-      // Здесь будет логика для изменения пароля
-      // В реальном приложении здесь будет вызов API
-      alert('Пароль успешно изменен');
+      // Здесь будет вызов API для смены пароля
+      console.log("Отправка запроса на смену пароля");
       
-      // Сброс полей и закрытие модального окна
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setPasswordModalOpen(false);
+      // Заглушка для демонстрации
+      setTimeout(() => {
+         toast.success('Пароль успешно изменен', {
+            position: 'top-right',
+            autoClose: 3000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true
+         });
+         
+         // Очищаем поля формы после успешной смены пароля
+         setCurrentPassword('');
+         setNewPassword('');
+         setConfirmPassword('');
+         // Закрываем модальное окно
+         setPasswordModalOpen(false);
+      }, 1500);
    };
    
    // Обработчик загрузки изображения
-   const handleImageUpload = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-         const reader = new FileReader();
-         reader.onloadend = () => {
-            const base64String = reader.result;
-            setProfileImage(base64String);
-            
-            // Сохраняем в localStorage с уникальным ключом, включая временную метку для предотвращения кэширования
-            const storageKey = 'vrach_profileImage';
-            localStorage.setItem(storageKey, base64String);
-            
-            // Отправляем пользовательское событие, чтобы уведомить другие компоненты
-            const profileImageEvent = new CustomEvent('profileImageUpdated', {
-               detail: { profileImage: base64String }
-            });
-            window.dispatchEvent(profileImageEvent);
-            console.log('Событие profileImageUpdated отправлено');
-         };
-         reader.readAsDataURL(file);
-      }
+   const handleImageUpload = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+         const imageData = e.target.result;
+         setProfileImage(imageData);
+         // Сохраняем изображение в localStorage для примера
+         // В реальном приложении нужно загрузить на сервер
+         localStorage.setItem('profileImage', imageData);
+         
+         toast.success('Фото профиля успешно обновлено', {
+            position: 'top-right',
+            autoClose: 3000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true
+         });
+      };
+      reader.readAsDataURL(file);
    };
    
-   // Сохранение настроек уведомлений
+   const handleChangePhotoClick = () => {
+      // Программно кликаем по скрытому input[type="file"]
+      avatarInputRef.current?.click();
+   };
+   
+   // Добавляем обработчик сохранения настроек уведомлений
    const handleNotificationsSave = () => {
       // Здесь будет логика сохранения настроек уведомлений
-      // В реальном приложении здесь будет вызов API
-      alert('Настройки уведомлений сохранены');
+      toast.success('Настройки уведомлений сохранены', {
+         position: 'top-right',
+         autoClose: 3000,
+         hideProgressBar: false,
+         closeOnClick: true,
+         pauseOnHover: true,
+         draggable: true
+      });
       setNotificationsModalOpen(false);
    };
-   
-   // Удаление аккаунта
+
+   // Добавляем обработчик удаления аккаунта
    const handleDeleteAccount = () => {
       // Здесь будет логика удаления аккаунта
-      // В реальном приложении здесь будет вызов API
-      alert('Аккаунт был удален');
+      toast.error('Аккаунт был удален', {
+         position: 'top-right',
+         autoClose: 3000,
+         hideProgressBar: false,
+         closeOnClick: true,
+         pauseOnHover: true,
+         draggable: true
+      });
       setDeleteAccountModalOpen(false);
-      // В реальном приложении здесь будет редирект на страницу логина
-   };
-
-   // Создаем ссылки на инпут файлы для возможности программного вызова
-   const avatarInputRef = React.useRef(null);
-   
-   // Обработчик кнопки изменения фото
-   const handleChangePhotoClick = () => {
-      // Программно вызываем клик по скрытому инпуту выбора файла
-      avatarInputRef.current.click();
    };
 
    return (
-      <div className="space-y-8">
-         {/* Секция аватара профиля */}
-         <div className="flex flex-col items-center mb-6">
-            <div className="w-24 h-24 relative rounded-full overflow-hidden mb-3 border-3 border-primary shadow-md">
-               {profileImage ? (
-                  <img 
-                     src={profileImage} 
-                     alt="Аватар профиля" 
-                     className="w-full h-full object-cover"
-                  />
-               ) : (
-                  <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                     <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                     </svg>
-                  </div>
-               )}
-            </div>
+      <motion.div
+         initial="hidden"
+         animate="visible"
+         variants={fadeIn}
+         className="patient-profile-form"
+      >
+         {/* Аватар пользователя */}
+         <div className="flex flex-col items-center mb-8">
+            <motion.div 
+               whileHover={{ scale: 1.05 }}
+               whileTap={{ scale: 0.95 }}
+               className="mb-4"
+            >
+               <Avatar 
+                  src={profileImage || "https://i.pravatar.cc/150?u=a042581f4e29026704d"} 
+                  className="w-24 h-24" 
+                  isBordered 
+                  color="primary"
+               />
+            </motion.div>
+            
             {isEditing && (
-               <>
-                 <input 
-                    type="file" 
-                    ref={avatarInputRef}
-                    className="hidden" 
-                    accept="image/*" 
-                    onChange={handleImageUpload}
-                 />
-                 <Button
-                    color="primary"
-                    className="font-medium"
-                    size="sm"
-                    radius="full"
-                    onClick={handleChangePhotoClick}
-                 >
-                    Изменить фото
-                 </Button>
-               </>
+               <motion.div variants={slideUp} className="flex gap-2">
+                  <input 
+                     type="file" 
+                     ref={avatarInputRef}
+                     className="hidden" 
+                     accept="image/*" 
+                     onChange={handleImageUpload}
+                  />
+                  <Button
+                     color="primary"
+                     className="font-medium"
+                     size="sm"
+                     radius="full"
+                     onClick={handleChangePhotoClick}
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                     }
+                  >
+                     Изменить фото
+                  </Button>
+               </motion.div>
             )}
          </div>
       
          {/* Заголовок секции и кнопка редактирования */}
-         <div className="flex justify-between items-center mb-2">
-            <h3 className="text-lg font-semibold text-gray-800">Профиль пациента</h3>
+         <div className="flex justify-between items-center mb-5">
+            <motion.h3 
+               variants={slideUp}
+               className="text-xl font-semibold text-gray-800 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent"
+            >
+               Профиль пациента
+            </motion.h3>
             {!isEditing && profile && (
-               <Button 
-                  color="primary" 
-                  variant="light" 
-                  size="sm"
-                  startContent={
-                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                     </svg>
-                  }
-                  onClick={handleEditClick}
+               <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3 }}
                >
-                  Редактировать
-               </Button>
+                  <Button 
+                     color="primary" 
+                     variant="light" 
+                     size="sm"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                     }
+                     onClick={handleEditClick}
+                  >
+                     Редактировать
+                  </Button>
+               </motion.div>
             )}
          </div>
          
          {/* Режим просмотра (нередактируемый) */}
          {!isEditing && profile && (
-            <Card className="mb-6 shadow-sm">
-               <CardBody className="p-5">
-                  <div className="space-y-4">
-                     <div>
-                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Полное имя</h4>
-                        <p className="text-medium">{full_name || 'Не указано'}</p>
-                     </div>
-                     
-                     <div>
-                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Контактный телефон</h4>
-                        <p className="text-medium">{contact_phone || 'Не указано'}</p>
-                     </div>
-                     
-                     <div>
-                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Адрес</h4>
-                        <p className="text-medium">{contact_address || 'Не указано'}</p>
-                     </div>
-                     
-                     <div>
-                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Район</h4>
-                        <p className="text-medium">{district || 'Не указано'}</p>
-                     </div>
-                     
-                     <Divider className="my-3" />
-                     
-                     <div>
-                        <h4 className="text-sm font-semibold text-gray-500 mb-1">Медицинская информация</h4>
-                        <p className="text-medium whitespace-pre-line">{medicalInfo || 'Не указано'}</p>
-                     </div>
-                  </div>
-               </CardBody>
-            </Card>
+            <motion.div
+               variants={slideUp}
+               initial="hidden"
+               animate="visible"
+            >
+               <Card className="mb-6 shadow-sm overflow-hidden">
+                  <CardBody className="p-6">
+                     <motion.div 
+                        className="space-y-4"
+                        initial="hidden"
+                        animate="visible"
+                        variants={{
+                           hidden: { opacity: 0 },
+                           visible: {
+                              opacity: 1,
+                              transition: {
+                                 staggerChildren: 0.1
+                              }
+                           }
+                        }}
+                     >
+                        <motion.div variants={slideUp}>
+                           <h4 className="text-sm font-semibold text-gray-500 mb-1">Полное имя</h4>
+                           <p className="text-medium">{full_name || 'Не указано'}</p>
+                        </motion.div>
+                        
+                        <motion.div variants={slideUp}>
+                           <h4 className="text-sm font-semibold text-gray-500 mb-1">Контактный телефон</h4>
+                           <p className="text-medium">{contact_phone || 'Не указано'}</p>
+                        </motion.div>
+                        
+                        <motion.div variants={slideUp}>
+                           <h4 className="text-sm font-semibold text-gray-500 mb-1">Адрес</h4>
+                           <p className="text-medium">{contact_address || 'Не указано'}</p>
+                        </motion.div>
+                        
+                        <motion.div variants={slideUp}>
+                           <h4 className="text-sm font-semibold text-gray-500 mb-1">Район</h4>
+                           <p className="text-medium">{district || 'Не указано'}</p>
+                        </motion.div>
+                        
+                        <Divider className="my-3" />
+                        
+                        <motion.div variants={slideUp}>
+                           <h4 className="text-sm font-semibold text-gray-500 mb-1">Медицинская информация</h4>
+                           <p className="text-medium whitespace-pre-line">{medicalInfo || 'Не указано'}</p>
+                        </motion.div>
+                     </motion.div>
+                  </CardBody>
+               </Card>
+            </motion.div>
          )}
          
          {/* Режим редактирования */}
          {isEditing && (
-            <form onSubmit={handleSubmit} className="space-y-6">
-               <div className="mb-6">
-                  <h3 className="text-lg font-semibold mb-2 text-gray-800">Основная информация</h3>
-                  <p className="text-sm text-gray-500 mb-4">Используется для идентификации вас в системе</p>
-                  
-                  <div className="space-y-4">
-                     <Input
-                        label="Полное имя"
-                        placeholder="Иванов Иван Иванович"
-                        value={full_name}
-                        onChange={(e) => setFullName(e.target.value)}
-                        variant="bordered"
-                        radius="sm"
-                        isRequired
-                        labelPlacement="outside"
-                        size="md"
-                        classNames={{
-                           input: "text-sm py-2",
-                           inputWrapper: "py-0 h-auto min-h-[46px]",
-                           label: "pb-1 text-small font-medium",
-                           base: "mb-4"
-                        }}
-                     />
-                     
-                     <Input
-                        label="Контактный телефон"
-                        placeholder="+998(XX) XXX-XX-XX"
-            value={contact_phone}
-            onChange={(e) => setContactPhone(e.target.value)}
-                        variant="bordered"
-                        radius="sm"
-                        labelPlacement="outside"
-                        size="md"
-                        type="tel"
-                        classNames={{
-                           input: "text-sm py-2",
-                           inputWrapper: "py-0 h-auto min-h-[46px]",
-                           label: "pb-1 text-small font-medium",
-                           base: "mb-4"
-                        }}
-                     />
-                     
-                     <Input
-            label="Адрес"
-                        placeholder="г. Ташкент, ул. Примерная, д. 1, кв. 123"
-            value={contact_address}
-            onChange={(e) => setContactAddress(e.target.value)}
-                        variant="bordered"
-                        radius="sm"
-                        labelPlacement="outside"
-                        size="md"
-                        classNames={{
-                           input: "text-sm py-2",
-                           inputWrapper: "py-0 h-auto min-h-[46px]",
-                           label: "pb-1 text-small font-medium",
-                           base: "mb-4"
-                        }}
-                     />
-                     
-                     <Select
-                       label="Район"
-                       placeholder="Выберите район"
-                       labelPlacement="outside"
-                       selectedKeys={district ? [district] : []}
-                       onSelectionChange={(keys) => {
-                         const selected = Array.from(keys)[0];
-                         setDistrict(selected || '');
-                       }}
-                       variant="bordered"
-                       radius="sm"
-                       size="md"
-                       classNames={{
-                         trigger: "h-auto min-h-[46px] py-0",
-                         label: "pb-1 text-small font-medium",
-                         base: "mb-4"
-                       }}
-                     >
-                       {districts.map((dist) => (
-                         <SelectItem key={dist.value} value={dist.value}>
-                           {dist.label}
-                         </SelectItem>
-                       ))}
-                     </Select>
-                  </div>
-               </div>
+            <motion.form 
+               onSubmit={handleSubmit}
+               initial="hidden"
+               animate="visible"
+               variants={slideUp}
+               className="space-y-5"
+            >
+               {/* Вывод ошибки */}
+               {(error || formLocalError) && (
+                  <motion.div 
+                     className="bg-danger-50 text-danger p-3 rounded-lg mb-4"
+                     initial={{ opacity: 0, y: -10 }}
+                     animate={{ opacity: 1, y: 0 }}
+                     transition={{ duration: 0.3 }}
+                  >
+                     {error || formLocalError}
+                  </motion.div>
+               )}
                
-               <Divider className="my-6" />
-               
-               <div className="mb-6">
-                  <h3 className="text-lg font-semibold mb-2 text-gray-800">Медицинская информация</h3>
-                  <p className="text-sm text-gray-500 mb-4">Эта информация поможет врачам лучше понять вашу историю</p>
+               <motion.div 
+                  variants={slideUp} 
+                  className="grid gap-5 md:grid-cols-2"
+               >
+                  <Input
+                     label="Полное имя"
+                     placeholder="Введите ваше ФИО"
+                     value={full_name}
+                     onChange={(e) => setFullName(e.target.value)}
+                     variant="bordered"
+                     radius="sm"
+                     isRequired
+                     labelPlacement="outside"
+                     className="max-w-full"
+                     autoFocus
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                     }
+                  />
                   
+                  <Input
+                     label="Контактный телефон"
+                     placeholder="Введите ваш телефон"
+                     value={contact_phone}
+                     onChange={(e) => setContactPhone(e.target.value)}
+                     variant="bordered"
+                     radius="sm"
+                     labelPlacement="outside"
+                     className="max-w-full"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                     }
+                  />
+               </motion.div>
+               
+               <motion.div variants={slideUp}>
+                  <Input
+                     label="Адрес"
+                     placeholder="Введите ваш адрес"
+                     value={contact_address}
+                     onChange={(e) => setContactAddress(e.target.value)}
+                     variant="bordered"
+                     radius="sm"
+                     labelPlacement="outside"
+                     className="max-w-full"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                     }
+                  />
+               </motion.div>
+               
+               <motion.div variants={slideUp}>
+                  <Select
+                     label="Район"
+                     placeholder="Выберите район"
+                     selectedKeys={district ? [district] : []}
+                     onChange={(e) => setDistrict(e.target.value)}
+                     variant="bordered"
+                     radius="sm"
+                     labelPlacement="outside"
+                     className="max-w-full"
+                  >
+                     <SelectItem key="Алмазарский район" value="Алмазарский район">Алмазарский район</SelectItem>
+                     <SelectItem key="Бектемирский район" value="Бектемирский район">Бектемирский район</SelectItem>
+                     <SelectItem key="Мирабадский район" value="Мирабадский район">Мирабадский район</SelectItem>
+                     <SelectItem key="Мирзо-Улугбекский район" value="Мирзо-Улугбекский район">Мирзо-Улугбекский район</SelectItem>
+                     <SelectItem key="Сергелийский район" value="Сергелийский район">Сергелийский район</SelectItem>
+                     <SelectItem key="Учтепинский район" value="Учтепинский район">Учтепинский район</SelectItem>
+                     <SelectItem key="Чиланзарский район" value="Чиланзарский район">Чиланзарский район</SelectItem>
+                     <SelectItem key="Шайхантаурский район" value="Шайхантаурский район">Шайхантаурский район</SelectItem>
+                     <SelectItem key="Юнусабадский район" value="Юнусабадский район">Юнусабадский район</SelectItem>
+                     <SelectItem key="Яккасарайский район" value="Яккасарайский район">Яккасарайский район</SelectItem>
+                     <SelectItem key="Яшнабадский район" value="Яшнабадский район">Яшнабадский район</SelectItem>
+                  </Select>
+               </motion.div>
+               
+               <motion.div variants={slideUp}>
                   <Textarea
                      label="Медицинская информация"
-                     placeholder="Укажите информацию о хронических заболеваниях, аллергиях, группе крови и другую важную медицинскую информацию"
+                     placeholder="Укажите важную медицинскую информацию (аллергии, хронические заболевания и т.д.)"
                      value={medicalInfo}
                      onChange={(e) => setMedicalInfo(e.target.value)}
                      variant="bordered"
                      radius="sm"
                      labelPlacement="outside"
-                     size="md"
                      minRows={3}
-                     classNames={{
-                        input: "text-sm py-2",
-                        inputWrapper: "py-0 min-h-[100px]",
-                        label: "pb-1 text-small font-medium",
-                        base: "mb-4"
-                     }}
+                     maxRows={5}
+                     className="max-w-full"
                   />
-               </div>
-
-               {/* Отображение ошибки валидации */}
-               <div className="min-h-[50px] mb-4">
-         {formLocalError && (
-                     <div className="bg-danger-50 text-danger p-3 rounded-lg border border-danger-200 text-sm">
-                        <div className="flex items-center">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                           </svg>
-                           <p className="font-medium">{formLocalError}</p>
-                        </div>
-                     </div>
-                  )}
-               </div>
+               </motion.div>
                
-               <div className="flex justify-center space-x-3 pt-2">
+               <motion.div 
+                  variants={slideUp} 
+                  className="flex justify-center space-x-3 pt-4"
+               >
                   {profile && (
                      <Button
                         type="button"
@@ -461,306 +527,274 @@ function PatientProfileForm({ profile, onSave, isLoading, error }) {
                   >
                      {isLoading ? 'Сохранение...' : 'Сохранить профиль'}
                   </Button>
-               </div>
-            </form>
+               </motion.div>
+            </motion.form>
          )}
          
          {/* Футер с настройками аккаунта */}
-         <div className="mt-12 pt-6 border-t border-gray-200">
-            <h2 className="text-lg font-bold mb-4 text-gray-800">Настройки аккаунта</h2>
-            
-            {/* Карточки настроек */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-               {/* Карточка смены пароля */}
-               <Card className="w-full shadow-sm hover:shadow-md transition-shadow">
-                  <CardBody className="p-4">
-                     <div className="flex flex-col h-full">
-                        <div className="mb-3 flex items-center">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                           </svg>
-                           <h3 className="text-medium font-semibold">Смена пароля</h3>
-                        </div>
-                        <p className="text-sm text-gray-500 mb-4">Обновите пароль для повышения безопасности</p>
-                        <div className="mt-auto">
-                           <Button 
-                              color="primary"
-                              variant="flat"
-                              className="w-full text-sm"
-                              size="sm"
-                              onClick={() => setPasswordModalOpen(true)}
-                           >
-                              {isGoogleAccount ? "Установить пароль" : "Изменить пароль"}
-                           </Button>
-                        </div>
-                     </div>
-                  </CardBody>
-               </Card>
+         {profile && (
+            <motion.div 
+               variants={slideUp} 
+               className="mt-10"
+            >
+               <Divider className="my-5" />
+               <h3 className="text-lg font-semibold text-gray-800 mb-4 bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Настройки аккаунта</h3>
                
-               {/* Карточка настроек уведомлений */}
-               <Card className="w-full shadow-sm hover:shadow-md transition-shadow">
-                  <CardBody className="p-4">
-                     <div className="flex flex-col h-full">
-                        <div className="mb-3 flex items-center">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+               <div className="grid gap-3">
+                  {/* Кнопка смены пароля - скрываем для Google аккаунтов */}
+                  {!isGoogleAccount && (
+                     <Button
+                        color="default"
+                        variant="light"
+                        startContent={
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                            </svg>
-                           <h3 className="text-medium font-semibold">Уведомления</h3>
-                        </div>
-                        <p className="text-sm text-gray-500 mb-4">Управление email и push-уведомлениями</p>
-                        <div className="mt-auto">
-                           <Button 
-                              color="primary"
-                              variant="flat"
-                              className="w-full text-sm"
-                              size="sm"
-                              onClick={() => setNotificationsModalOpen(true)}
-                           >
-                              Настроить уведомления
-                           </Button>
-                        </div>
-                     </div>
-                  </CardBody>
-               </Card>
-               
-               {/* Карточка удаления аккаунта */}
-               <Card className="w-full shadow-sm hover:shadow-md transition-shadow">
-                  <CardBody className="p-4">
-                     <div className="flex flex-col h-full">
-                        <div className="mb-3 flex items-center">
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                           </svg>
-                           <h3 className="text-medium font-semibold text-danger">Удаление аккаунта</h3>
-                        </div>
-                        <p className="text-sm text-gray-500 mb-4">Удаление всех данных аккаунта</p>
-                        <div className="mt-auto">
-             <Button
-                              color="danger"
-                              variant="flat"
-                              className="w-full text-sm"
-                              size="sm"
-                              onClick={() => setDeleteAccountModalOpen(true)}
-                           >
-                              Удалить аккаунт
-                           </Button>
-                        </div>
-                     </div>
-                  </CardBody>
-               </Card>
-            </div>
-         </div>
+                        }
+                        onClick={() => setPasswordModalOpen(true)}
+                        className="justify-start transform transition-transform hover:scale-105"
+                     >
+                        Сменить пароль
+                     </Button>
+                  )}
+                  
+                  {/* Кнопка настроек уведомлений */}
+                  <Button
+                     color="default"
+                     variant="light"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                     }
+                     onClick={() => setNotificationsModalOpen(true)}
+                     className="justify-start transform transition-transform hover:scale-105"
+                  >
+                     Настройка уведомлений
+                  </Button>
+                  
+                  {/* Кнопка настроек приватности */}
+                  <Button
+                     color="default"
+                     variant="light"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                     }
+                     onClick={() => setPrivacyModalOpen(true)}
+                     className="justify-start transform transition-transform hover:scale-105"
+                  >
+                     Настройки приватности
+                  </Button>
+                  
+                  {/* Кнопка удаления аккаунта */}
+                  <Button
+                     color="danger"
+                     variant="light"
+                     startContent={
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                     }
+                     onClick={handleDeleteAccount}
+                     className="justify-start transform transition-transform hover:scale-105"
+                  >
+                     Удалить аккаунт
+                  </Button>
+               </div>
+            </motion.div>
+         )}
          
          {/* Модальное окно смены пароля */}
-         <Modal 
-            isOpen={isPasswordModalOpen} 
-            onClose={() => setPasswordModalOpen(false)}
-            placement="center"
-            size="md"
-         >
+         <Modal isOpen={isPasswordModalOpen} onClose={() => setPasswordModalOpen(false)}>
             <ModalContent>
-               {(onClose) => (
-                  <>
-                     <ModalHeader className="flex flex-col gap-1 text-medium">
-                        {isGoogleAccount ? "Установка пароля" : "Изменение пароля"}
-                     </ModalHeader>
-                     <ModalBody>
-                        <form onSubmit={handlePasswordChange} className="space-y-4">
-                           {!isGoogleAccount && (
-                              <Input
-                                 label="Текущий пароль"
-                                 placeholder="Введите ваш текущий пароль"
-                                 value={currentPassword}
-                                 onChange={(e) => setCurrentPassword(e.target.value)}
-                                 variant="bordered"
-                                 radius="sm"
-                                 isRequired
-                                 labelPlacement="outside"
-                                 size="sm"
-                                 type="password"
-                                 classNames={{
-                                    input: "text-sm py-1",
-                                    inputWrapper: "py-0 h-auto min-h-[40px]",
-                                    label: "pb-1 text-small font-medium",
-                                    base: "mb-2"
-                                 }}
-                              />
-                           )}
-                           
-                           <Input
-                              label="Новый пароль"
-                              placeholder="Минимум 8 символов"
-                              value={newPassword}
-                              onChange={(e) => setNewPassword(e.target.value)}
-                              variant="bordered"
-                              radius="sm"
-                              isRequired
-                              labelPlacement="outside"
-                              size="sm"
-                              type="password"
-                              classNames={{
-                                 input: "text-sm py-1",
-                                 inputWrapper: "py-0 h-auto min-h-[40px]",
-                                 label: "pb-1 text-small font-medium",
-                                 base: "mb-2"
-                              }}
-                           />
-                           
-                           <Input
-                              label="Подтверждение пароля"
-                              placeholder="Повторите новый пароль"
-                              value={confirmPassword}
-                              onChange={(e) => setConfirmPassword(e.target.value)}
-                              variant="bordered"
-                              radius="sm"
-                              isRequired
-                              labelPlacement="outside"
-                              size="sm"
-                              type="password"
-                              classNames={{
-                                 input: "text-sm py-1",
-                                 inputWrapper: "py-0 h-auto min-h-[40px]",
-                                 label: "pb-1 text-small font-medium",
-                                 base: "mb-2"
-                              }}
-                           />
-                           
-                           {/* Отображение ошибки пароля */}
-                           <div className="min-h-[50px]">
-                              {passwordError && (
-                                 <div className="bg-danger-50 text-danger p-2 rounded-lg border border-danger-200 text-sm">
-                                    <div className="flex items-center">
-                                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                       </svg>
-                                       <p className="font-medium">{passwordError}</p>
-                                    </div>
-                                 </div>
-                              )}
-                           </div>
-                        </form>
-                     </ModalBody>
-                     <ModalFooter>
-                        <Button color="danger" variant="light" size="sm" onPress={onClose}>
-                           Отмена
-                        </Button>
-                        <Button color="primary" size="sm" onClick={handlePasswordChange}>
-                           {isGoogleAccount ? "Установить пароль" : "Изменить пароль"}
-                        </Button>
-                     </ModalFooter>
-                  </>
-               )}
+               <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl text-primary">Изменение пароля</h2>
+               </ModalHeader>
+               <ModalBody>
+                  {passwordError && (
+                     <div className="bg-danger-50 text-danger p-3 rounded-lg mb-4">
+                        {passwordError}
+                     </div>
+                  )}
+                  
+                  <form onSubmit={handleChangePassword}>
+                     <div className="space-y-4">
+                        <Input
+                           type="password"
+                           label="Текущий пароль"
+                           placeholder="Введите текущий пароль"
+                           value={currentPassword}
+                           onChange={(e) => setCurrentPassword(e.target.value)}
+                           variant="bordered"
+                        />
+                        
+                        <Input
+                           type="password"
+                           label="Новый пароль"
+                           placeholder="Минимум 8 символов"
+                           value={newPassword}
+                           onChange={(e) => setNewPassword(e.target.value)}
+                           variant="bordered"
+                        />
+                        
+                        <Input
+                           type="password"
+                           label="Подтвердите новый пароль"
+                           placeholder="Повторите новый пароль"
+                           value={confirmPassword}
+                           onChange={(e) => setConfirmPassword(e.target.value)}
+                           variant="bordered"
+                        />
+                     </div>
+                  </form>
+               </ModalBody>
+               <ModalFooter>
+                  <Button color="default" variant="light" onClick={() => setPasswordModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={handleChangePassword}>
+                     Сохранить пароль
+                  </Button>
+               </ModalFooter>
             </ModalContent>
          </Modal>
          
          {/* Модальное окно настроек уведомлений */}
-         <Modal 
-            isOpen={isNotificationsModalOpen} 
-            onClose={() => setNotificationsModalOpen(false)}
-            placement="center"
-            size="md"
-         >
+         <Modal isOpen={isNotificationsModalOpen} onClose={() => setNotificationsModalOpen(false)}>
             <ModalContent>
-               {(onClose) => (
-                  <>
-                     <ModalHeader className="flex flex-col gap-1 text-medium">
-                        Настройки уведомлений
-                     </ModalHeader>
-                     <ModalBody>
-                        <div className="space-y-4">
-                           <div className="flex justify-between items-center border-b pb-3">
-                              <div>
-                                 <h3 className="text-small font-semibold">Email-уведомления</h3>
-                                 <p className="text-xs text-gray-500">Получать уведомления на email</p>
-                              </div>
-                              <Switch 
-                                 isSelected={emailNotifications}
-                                 onValueChange={setEmailNotifications}
-                                 color="primary"
-                                 size="sm"
-                              />
-                           </div>
-                           
-                           <div className="flex justify-between items-center border-b pb-3">
-                              <div>
-                                 <h3 className="text-small font-semibold">Push-уведомления</h3>
-                                 <p className="text-xs text-gray-500">Получать уведомления в браузере</p>
-                              </div>
-                              <Switch 
-                                 isSelected={pushNotifications}
-                                 onValueChange={setPushNotifications}
-                                 color="primary"
-                                 size="sm"
-                              />
-                           </div>
-                           
-                           <div className="flex justify-between items-center pb-2">
-                              <div>
-                                 <h3 className="text-small font-semibold">Напоминания о записях</h3>
-                                 <p className="text-xs text-gray-500">Напоминать о приближающихся консультациях</p>
-                              </div>
-                              <Switch 
-                                 isSelected={appointmentReminders}
-                                 onValueChange={setAppointmentReminders}
-                                 color="primary"
-                                 size="sm"
-                              />
-                           </div>
+               <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl text-primary">Настройки уведомлений</h2>
+               </ModalHeader>
+               <ModalBody>
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Email уведомления</h3>
+                           <p className="text-small text-default-500">Получать уведомления на почту</p>
                         </div>
-                     </ModalBody>
-                     <ModalFooter>
-                        <Button color="danger" variant="light" size="sm" onPress={onClose}>
-                           Отмена
-                        </Button>
-                        <Button color="primary" size="sm" onClick={handleNotificationsSave}>
-                           Сохранить настройки
-                        </Button>
-                     </ModalFooter>
-                  </>
-               )}
+                        <Switch 
+                           isSelected={emailNotifications}
+                           onValueChange={setEmailNotifications}
+                           color="primary"
+                        />
+                     </div>
+                     
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Push-уведомления</h3>
+                           <p className="text-small text-default-500">Получать уведомления в браузере</p>
+                        </div>
+                        <Switch 
+                           isSelected={pushNotifications}
+                           onValueChange={setPushNotifications}
+                           color="primary"
+                        />
+                     </div>
+                     
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Напоминания о консультациях</h3>
+                           <p className="text-small text-default-500">Получать напоминания о предстоящих консультациях</p>
+                        </div>
+                        <Switch 
+                           isSelected={appointmentReminders}
+                           onValueChange={setAppointmentReminders}
+                           color="primary"
+                        />
+                     </div>
+                  </div>
+               </ModalBody>
+               <ModalFooter>
+                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={handleNotificationsSave}>
+                     Сохранить
+                  </Button>
+               </ModalFooter>
+            </ModalContent>
+         </Modal>
+         
+         {/* Модальное окно настроек приватности */}
+         <Modal isOpen={isPrivacyModalOpen} onClose={() => setPrivacyModalOpen(false)}>
+            <ModalContent>
+               <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl text-primary">Настройки приватности</h2>
+               </ModalHeader>
+               <ModalBody>
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Видимость профиля</h3>
+                           <p className="text-small text-default-500">Видимость вашего профиля для других пользователей</p>
+                        </div>
+                        <Switch 
+                           defaultSelected
+                           color="primary"
+                        />
+                     </div>
+                     
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Доступ к медицинской информации</h3>
+                           <p className="text-small text-default-500">Разрешить врачам видеть вашу медицинскую информацию</p>
+                        </div>
+                        <Switch 
+                           defaultSelected
+                           color="primary"
+                        />
+                     </div>
+                  </div>
+               </ModalBody>
+               <ModalFooter>
+                  <Button color="default" variant="light" onClick={() => setPrivacyModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={() => setPrivacyModalOpen(false)}>
+                     Сохранить
+                  </Button>
+               </ModalFooter>
             </ModalContent>
          </Modal>
          
          {/* Модальное окно удаления аккаунта */}
-         <Modal 
-            isOpen={isDeleteAccountModalOpen} 
-            onClose={() => setDeleteAccountModalOpen(false)}
-            placement="center"
-            size="md"
-         >
+         <Modal isOpen={isDeleteAccountModalOpen} onClose={() => setDeleteAccountModalOpen(false)}>
             <ModalContent>
-               {(onClose) => (
-                  <>
-                     <ModalHeader className="flex flex-col gap-1 text-medium text-danger">
-                        Удаление аккаунта
-                     </ModalHeader>
-                     <ModalBody>
-                        <div className="space-y-3">
-                           <p className="text-sm font-semibold text-danger">Внимание! Это действие необратимо.</p>
-                           <p className="text-sm">При удалении аккаунта будут удалены все ваши данные:</p>
-                           <ul className="list-disc pl-5 space-y-1 text-sm">
-                              <li>Личная информация</li>
-                              <li>История консультаций</li>
-                              <li>Медицинские данные</li>
-                              <li>Записи к врачам</li>
-                           </ul>
-                           <p className="mt-3 text-sm">Пожалуйста, подтвердите, что вы хотите удалить аккаунт.</p>
-                        </div>
-                     </ModalBody>
-                     <ModalFooter>
-                        <Button color="default" variant="light" size="sm" onPress={onClose}>
-                           Отмена
-                        </Button>
-                        <Button color="danger" size="sm" onClick={handleDeleteAccount}>
-                           Подтвердить удаление
-             </Button>
-                     </ModalFooter>
-                  </>
-               )}
+               <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl text-danger">Удаление аккаунта</h2>
+               </ModalHeader>
+               <ModalBody>
+                  <div className="bg-danger-50 p-4 rounded-lg text-danger mb-4">
+                     <h3 className="font-medium mb-2">Внимание! Это действие необратимо.</h3>
+                     <p>При удалении аккаунта:</p>
+                     <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li>Вся информация вашего профиля будет удалена</li>
+                        <li>История консультаций будет недоступна</li>
+                        <li>Восстановление аккаунта будет невозможно</li>
+                     </ul>
+                  </div>
+                  
+                  <Input
+                     type="text"
+                     label="Для подтверждения введите 'удалить'"
+                     placeholder="удалить"
+                     variant="bordered"
+                  />
+               </ModalBody>
+               <ModalFooter>
+                  <Button color="default" variant="light" onClick={() => setDeleteAccountModalOpen(false)}>
+                     Отмена
+                  </Button>
+                  <Button color="danger" onClick={handleDeleteAccount}>
+                     Удалить аккаунт
+                  </Button>
+               </ModalFooter>
             </ModalContent>
          </Modal>
-      </div>
+      </motion.div>
    );
-}
+};
 
 export default PatientProfileForm;

@@ -525,6 +525,18 @@ function AdminPage() {
                       <span className="text-small text-gray-500">Фотография:</span>
                       {selectedApplication.photo_path ? (
                         <div className="mt-2 border rounded-md overflow-hidden">
+                          <a 
+                            href={`${API_BASE_URL}${selectedApplication.photo_path}`} 
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center text-primary hover:underline mb-2"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            Открыть в полном размере
+                          </a>
                           <img 
                             src={`${API_BASE_URL}${selectedApplication.photo_path}`} 
                             alt="Фото врача" 
@@ -540,34 +552,30 @@ function AdminPage() {
                     <div>
                       <span className="text-small text-gray-500">Диплом:</span>
                       {selectedApplication.diploma_path ? (
-                        <div className="mt-2">
+                        <div className="mt-2 border rounded-md overflow-hidden">
                           <a 
                             href={`${API_BASE_URL}${selectedApplication.diploma_path}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center text-primary hover:underline"
+                            className="flex items-center text-primary hover:underline mb-2"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                             </svg>
-                            Просмотреть документ
+                            Просмотреть документ в полном размере
                           </a>
                           {selectedApplication.diploma_path.toLowerCase().endsWith('.pdf') ? (
-                            <div className="mt-2 border rounded-md overflow-hidden h-48">
-                              <iframe 
-                                src={`${API_BASE_URL}${selectedApplication.diploma_path}`} 
-                                className="w-full h-full"
-                                title="Диплом"
-                              ></iframe>
-                            </div>
+                            <iframe 
+                              src={`${API_BASE_URL}${selectedApplication.diploma_path}`} 
+                              className="w-full h-48"
+                              title="Диплом"
+                            ></iframe>
                           ) : (
-                            <div className="mt-2 border rounded-md overflow-hidden">
-                              <img 
-                                src={`${API_BASE_URL}${selectedApplication.diploma_path}`} 
-                                alt="Диплом" 
-                                className="w-full h-auto max-h-48 object-cover"
-                              />
-                            </div>
+                            <img 
+                              src={`${API_BASE_URL}${selectedApplication.diploma_path}`} 
+                              alt="Диплом" 
+                              className="w-full h-auto max-h-48 object-cover"
+                            />
                           )}
                         </div>
                       ) : (
@@ -579,34 +587,30 @@ function AdminPage() {
                     <div>
                       <span className="text-small text-gray-500">Лицензия:</span>
                       {selectedApplication.license_path ? (
-                        <div className="mt-2">
+                        <div className="mt-2 border rounded-md overflow-hidden">
                           <a 
                             href={`${API_BASE_URL}${selectedApplication.license_path}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center text-primary hover:underline"
+                            className="flex items-center text-primary hover:underline mb-2"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                             </svg>
-                            Просмотреть документ
+                            Просмотреть документ в полном размере
                           </a>
                           {selectedApplication.license_path.toLowerCase().endsWith('.pdf') ? (
-                            <div className="mt-2 border rounded-md overflow-hidden h-48">
-                              <iframe 
-                                src={`${API_BASE_URL}${selectedApplication.license_path}`} 
-                                className="w-full h-full"
-                                title="Лицензия"
-                              ></iframe>
-                            </div>
+                            <iframe 
+                              src={`${API_BASE_URL}${selectedApplication.license_path}`} 
+                              className="w-full h-48"
+                              title="Лицензия"
+                            ></iframe>
                           ) : (
-                            <div className="mt-2 border rounded-md overflow-hidden">
-                              <img 
-                                src={`${API_BASE_URL}${selectedApplication.license_path}`} 
-                                alt="Лицензия" 
-                                className="w-full h-auto max-h-48 object-cover"
-                              />
-                            </div>
+                            <img 
+                              src={`${API_BASE_URL}${selectedApplication.license_path}`} 
+                              alt="Лицензия" 
+                              className="w-full h-auto max-h-48 object-cover"
+                            />
                           )}
                         </div>
                       ) : (

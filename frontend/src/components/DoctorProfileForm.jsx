@@ -1,6 +1,7 @@
 // frontend/src/components/DoctorProfileForm.jsx
 import React, { useState, useEffect } from 'react';
 import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem, Avatar, Chip } from '@nextui-org/react';
+import { toast } from 'react-toastify';
 
 // Компонент формы для профиля Врача
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Врача.
@@ -148,25 +149,28 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    // Обработчик изменения пароля
    const handlePasswordChange = (e) => {
       e.preventDefault();
-      setPasswordError(null);
       
-      if (!isGoogleAccount && !currentPassword) {
-         setPasswordError("Введите текущий пароль");
-         return;
-      }
-      
-      if (newPassword.length < 8) {
-         setPasswordError("Новый пароль должен содержать минимум 8 символов");
-         return;
-      }
-      
+      // Проверяем, что пароли совпадают
       if (newPassword !== confirmPassword) {
-         setPasswordError("Пароли не совпадают");
+         setPasswordError('Пароли не совпадают');
+         return;
+      }
+      
+      // Проверяем, что новый пароль достаточно длинный
+      if (newPassword.length < 8) {
+         setPasswordError('Новый пароль должен содержать минимум 8 символов');
          return;
       }
       
       // Здесь будет логика для изменения пароля
-      alert('Пароль успешно изменен');
+      toast.success('Пароль успешно изменен', {
+         position: 'top-right',
+         autoClose: 3000,
+         hideProgressBar: false,
+         closeOnClick: true,
+         pauseOnHover: true,
+         draggable: true
+      });
       
       // Сброс полей и закрытие модального окна
       setCurrentPassword('');
@@ -178,14 +182,28 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    // Сохранение настроек уведомлений
    const handleNotificationsSave = () => {
       // Здесь будет логика сохранения настроек уведомлений
-      alert('Настройки уведомлений сохранены');
+      toast.success('Настройки уведомлений сохранены', {
+         position: 'top-right',
+         autoClose: 3000,
+         hideProgressBar: false,
+         closeOnClick: true,
+         pauseOnHover: true,
+         draggable: true
+      });
       setNotificationsModalOpen(false);
    };
    
    // Удаление аккаунта
    const handleDeleteAccount = () => {
       // Здесь будет логика удаления аккаунта
-      alert('Аккаунт был удален');
+      toast.error('Аккаунт был удален', {
+         position: 'top-right',
+         autoClose: 3000,
+         hideProgressBar: false,
+         closeOnClick: true,
+         pauseOnHover: true,
+         draggable: true
+      });
       setDeleteAccountModalOpen(false);
    };
 
@@ -525,7 +543,7 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                   </div>
                </ModalBody>
                <ModalFooter>
-                  <Button variant="flat" onClick={() => setNotificationsModalOpen(false)}>
+                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)}>
                      Отмена
                   </Button>
                   <Button color="primary" onClick={handleNotificationsSave}>

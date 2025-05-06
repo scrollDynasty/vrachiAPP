@@ -48,6 +48,8 @@ class User(Base):
     email_verification_token = Column(String(255), unique=True, nullable=True) # Токен подтверждения email (может быть NULL)
     email_verification_token_created_at = Column(DateTime, nullable=True) # Время создания токена (может быть NULL)
 
+    # Поле для аватарки пользователя
+    avatar_path = Column(String(255), nullable=True)  # Путь к файлу аватарки
 
     # Отношения к профилям (один пользователь может иметь ОДИН профиль пациента или ОДИН профиль врача)
     # uselist=False указывает на отношение "один к одному"

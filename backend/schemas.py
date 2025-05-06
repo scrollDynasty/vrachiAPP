@@ -17,14 +17,14 @@ class UserCreate(BaseModel):
 
 # Модель для данных, возвращаемых после регистрации и при получении информации о пользователе (включая is_active)
 class UserResponse(BaseModel):
+    """Схема ответа с информацией о пользователе"""
     id: int
-    email: EmailStr
-    is_active: bool # <-- Это поле добавлено, чтобы фронтенд знал статус активации
+    email: str
     role: str
-
-    # Настройка для работы с SQLAlchemy ORM
-    # from_attributes = True позволяет Pydantic читать данные прямо из объектов SQLAlchemy
-    # Это замена устаревшего orm_mode = True в Pydantic V2+
+    is_active: bool
+    avatar_path: Optional[str] = None
+    auth_provider: Optional[str] = "email"  # Изменено на Optional для обратной совместимости
+    
     class Config:
         from_attributes = True
 

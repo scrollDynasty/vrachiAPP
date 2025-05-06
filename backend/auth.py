@@ -240,87 +240,48 @@ async def authenticate_google_user(google_data: dict, db: Session) -> User:
 # TokenData - это Pydantic модель для payload токена.
 # Можно использовать для более явного определения данных, которые мы ожидаем в токене.
 # Пока не используем ее в get_current_user для простоты, но это хорошая практика для больших проектов.
-# from pydantic import BaseModel
-# class TokenData(BaseModel):
-#     email: Optional[str] = None
-#     role: Optional[str] = None # Добавляем поле role, т.к. мы его кладем в токен
+from pydantic import BaseModel
+class TokenData(BaseModel):
+    username: str | None = None
+    role: str | None = None # Добавляем поле role, т.к. мы его кладем в токен
 
 # Модель для токена аутентификации
-from pydantic import BaseModel
-
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
 
-async def get_current_user(
-    # FastAPI автоматически предоставляет токен, извлекая его из заголовка "Authorization: Bearer ..."
-    token: Annotated[str, Depends(oauth2_scheme)],
-    # FastAPI автоматически предоставляет сессию БД, используя зависимость get_db (импортирована из models.py)
-    db: Annotated[Session, Depends(get_db)]
-# Возвращаемый тип - модель User SQLAlchemy
-) -> User:
+# Функция для получения текущего пользователя (используется как зависимость)
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     """
-    Зависимость FastAPI. Выполняет аутентификацию пользователя по JWT токену.
-    Извлекает токен, проверяет его валидность, извлекает идентификатор пользователя (email)
-    и роль из payload токена, загружает объект пользователя из базы данных.
+    Получение текущего пользователя на основе JWT токена.
+    Используется как зависимость для защищенных эндпоинтов.
 
     Args:
-        token (str): JWT токен, извлеченный из заголовка Authorization (Bearer <токен>).
-        db (Session): Сессия базы данных, предоставленная зависимостью get_db().
+        token (str): JWT токен, полученный из HTTP заголовка
+        db (Session): Сессия БД
 
     Returns:
-        User: Объект пользователя SQLAlchemy, соответствующий токену.
-
-    Raises:
-        HTTPException: С кодом 401 (Unauthorized), если токен невалидный, истек,
-                       или пользователь не найден/неактивен.
+        User: Объект пользователя, если токен валиден
     """
-    # Определяем исключение, которое будет выброшено в случае невалидных учетных данных (токена)
     credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED, # 401 - Неавторизован
-        detail="Could not validate credentials", # Сообщение об ошибке
-        headers={"WWW-Authenticate": "Bearer"}, # Указываем, что требуется Bearer токен (по стандарту OAuth2)
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
     )
-
     try:
-        # Декодируем токен. jwt.decode автоматически проверяет подпись, срок действия ('exp'), и т.д.
+        # Декодируем JWT токен
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-
-        # Извлекаем email пользователя из стандартного поля 'sub' (subject) payload.
-        # Это поле должно содержать уникальный идентификатор пользователя. Мы используем email.
-        email: str = payload.get("sub")
-        # Извлекаем роль пользователя из нашего кастомного поля 'role', которое мы добавили при создании токена.
-        user_role: str = payload.get("role")
-
-        if email is None or user_role is None:
-            # Если в токене отсутствуют необходимые поля (email или роль), считаем его невалидным.
+        username: str = payload.get("sub")
+        if username is None:
             raise credentials_exception
-
-        # Если бы использовали TokenData Pydantic модель:
-        # token_data = TokenData(email=email, role=user_role) # Валидируем payload токена
-
+        token_data = TokenData(username=username)
     except JWTError:
-        # Если токен невалидный (неправильная подпись, истек срок действия, неверный формат и т.д.),
-        # библиотека jwt выбрасывает JWTError. Мы перехватываем ее и выбрасываем HTTPException.
         raise credentials_exception
-
-    # Ищем пользователя в базе данных по email, извлеченному из токена.
-    # Это необходимо, чтобы убедиться, что пользователь все еще существует в системе.
-    user = db.query(User).filter(User.email == email).first()
-
+    # Ищем пользователя в БД по email из токена
+    user = db.query(User).filter(User.email == token_data.username).first()
     if user is None:
-        # Если пользователь из токена не найден в базе данных (например, был удален после выдачи токена).
         raise credentials_exception
-
-    # TODO: Можно добавить проверку user.is_active здесь, если нужно блокировать пользователей
-    # даже при наличии валидного токена (например, если администратор деактивировал пользователя).
-    # if not user.is_active:
-    #     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
-
-
-    # Если все проверки пройдены (токен валидный, пользователь найден), возвращаем объект пользователя SQLAlchemy.
-    # Этот объект будет доступен в эндпоинте, который использует эту зависимость.
     return user
 
 

@@ -12,15 +12,19 @@ import {
   DropdownTrigger, 
   DropdownMenu, 
   DropdownItem, 
-  Avatar
+  Avatar,
+  Button
 } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
+import api from '../api';
 
 function Header() {
   const { isAuthenticated, user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   
   // Загружаем фото профиля из localStorage при монтировании компонента
   useEffect(() => {
@@ -48,11 +52,47 @@ function Header() {
     };
   }, []);
   
-  // Обработчики навигации
-  const handleProfileClick = () => navigate('/profile');
-  const handleHistoryClick = () => navigate('/history');
-  const handleSearchDoctorsClick = () => navigate('/search-doctors');
-  const handleLogout = () => logout();
+  // При изменении пользователя или каждую минуту проверяем уведомления
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+  
+  // Функция для получения уведомлений
+  const fetchNotifications = async () => {
+    try {
+      const response = await api.get('/notifications');
+      
+      // Проверяем, что ответ содержит ожидаемые данные
+      if (response.data && Array.isArray(response.data.items)) {
+        setNotifications(response.data.items);
+        setUnreadCount(response.data.items.filter(notification => !notification.is_viewed).length);
+      } else {
+        // Если данные отсутствуют или имеют неправильный формат, устанавливаем пустой массив
+        console.warn('Получен неожиданный формат данных уведомлений:', response.data);
+        setNotifications([]);
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+      // В случае ошибки устанавливаем пустые данные
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  };
+  
+  // Функция для отметки уведомления как прочитанного
+  const markAsRead = async (notificationId) => {
+    try {
+      await api.post(`/notifications/${notificationId}/view`);
+      fetchNotifications();
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
+  };
   
   // Получаем первые буквы имени для аватара
   const getAvatarText = () => {
@@ -62,6 +102,17 @@ function Header() {
     }
     return user.email && typeof user.email === 'string' ? user.email[0].toUpperCase() : '?';
   };
+  
+  // Получаем аватар пользователя или используем первую букву email
+  const userAvatar = user?.avatar_path 
+    ? `${import.meta.env.VITE_API_URL}${user.avatar_path}` 
+    : null;
+  
+  // Обработчики навигации
+  const handleProfileClick = () => navigate('/profile');
+  const handleHistoryClick = () => navigate('/history');
+  const handleSearchDoctorsClick = () => navigate('/search-doctors');
+  const handleLogout = () => logout();
   
   return (
     <Navbar 
@@ -152,7 +203,7 @@ function Header() {
                 as="button"
                 color="primary"
                 size="sm"
-                src={profileImage}
+                src={userAvatar}
                 name={getAvatarText()}
                 className="transition-transform cursor-pointer hover:scale-110 hover:shadow-md"
               />
@@ -229,7 +280,24 @@ function Header() {
               </DropdownItem>
             </DropdownMenu>
           </Dropdown>
-        ) : null}
+        ) : (
+          <>
+            <NavbarItem className="hidden lg:flex">
+              <Link to="/login">
+                <Button color="primary" variant="flat">
+                  Войти
+                </Button>
+              </Link>
+            </NavbarItem>
+            <NavbarItem>
+              <Link to="/register">
+                <Button color="primary" variant="solid">
+                  Регистрация
+                </Button>
+              </Link>
+            </NavbarItem>
+          </>
+        )}
       </NavbarContent>
       
       {/* Мобильное меню */}

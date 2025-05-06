@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardBody, CardHeader, Tabs, Tab, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell, Chip, Divider, Spinner } from '@nextui-org/react';
+import { Card, CardHeader, CardBody, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell, Chip, Tabs, Tab, Spinner, Divider } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
 import api from '../api';
 
@@ -11,19 +11,18 @@ function HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Загрузка реальных консультаций при монтировании компонента
+  // Загружаем консультации при монтировании компонента или смене вкладки
   useEffect(() => {
     const fetchConsultations = async () => {
-      setLoading(true);
-      setError(null);
-      
       try {
-        // Получаем консультации с сервера
+        setLoading(true);
+        setError(null);
+        
         const response = await api.get('/api/consultations');
         setConsultations(response.data);
-      } catch (err) {
-        console.error('Error fetching consultations:', err);
-        setError('Не удалось загрузить историю консультаций');
+      } catch (error) {
+        console.error('Error fetching consultations:', error);
+        setError('Не удалось загрузить историю консультаций. Пожалуйста, попробуйте позже.');
       } finally {
         setLoading(false);
       }
@@ -34,31 +33,6 @@ function HistoryPage() {
       fetchConsultations();
     }
   }, [activeTab]);
-  
-  // Заглушка для данных платежей (в будущем будет получаться с бэкенда)
-  const mockPayments = [
-    {
-      id: 101,
-      date: "2023-05-15",
-      amount: 1500,
-      description: "Консультация: Терапевт - Иванов И.И.",
-      status: "success" // success, pending, failed
-    },
-    {
-      id: 102,
-      date: "2023-06-20",
-      amount: 2000,
-      description: "Предоплата: Кардиолог - Петрова А.С.",
-      status: "pending"
-    },
-    {
-      id: 103,
-      date: "2023-04-10",
-      amount: 500,
-      description: "Возврат за отмену: Невролог - Сидоров П.М.",
-      status: "success"
-    }
-  ];
   
   // Функция для получения цвета статуса консультации
   const getConsultationStatusColor = (status) => {
@@ -78,26 +52,6 @@ function HistoryPage() {
       case "active": return "Активна";
       case "pending": return "Ожидает";
       case "cancelled": return "Отменена";
-      default: return "Неизвестно";
-    }
-  };
-  
-  // Функция для получения цвета статуса платежа
-  const getPaymentStatusColor = (status) => {
-    switch(status) {
-      case "success": return "success";
-      case "pending": return "warning";
-      case "failed": return "danger";
-      default: return "default";
-    }
-  };
-  
-  // Функция для получения текста статуса платежа
-  const getPaymentStatusText = (status) => {
-    switch(status) {
-      case "success": return "Успешно";
-      case "pending": return "В обработке";
-      case "failed": return "Ошибка";
       default: return "Неизвестно";
     }
   };
@@ -128,7 +82,6 @@ function HistoryPage() {
             fullWidth
           >
             <Tab key="consultations" title="Консультации" />
-            <Tab key="payments" title="Платежи" />
           </Tabs>
         </CardHeader>
         
@@ -191,35 +144,6 @@ function HistoryPage() {
                 </Table>
               )}
             </>
-          )}
-          
-          {activeTab === "payments" && (
-            <Table aria-label="История платежей">
-              <TableHeader>
-                <TableColumn>Дата</TableColumn>
-                <TableColumn>Описание</TableColumn>
-                <TableColumn>Сумма</TableColumn>
-                <TableColumn>Статус</TableColumn>
-              </TableHeader>
-              <TableBody items={mockPayments}>
-                {(item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>{formatDate(item.date)}</TableCell>
-                    <TableCell>{item.description}</TableCell>
-                    <TableCell>{item.amount} ₽</TableCell>
-                    <TableCell>
-                      <Chip
-                        color={getPaymentStatusColor(item.status)}
-                        variant="flat"
-                        size="sm"
-                      >
-                        {getPaymentStatusText(item.status)}
-                      </Chip>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
           )}
         </CardBody>
       </Card>

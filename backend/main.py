@@ -209,7 +209,7 @@ def get_status():
 
 
 # Эндпоинт для регистрации нового пользователя. Не требует авторизации.
-@app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED) # 201 Created - стандартный статус для успешного создания
+@app.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED) # Изменяем ответ на Token вместо UserResponse
 def register_user(
     user: UserCreate, # Pydantic модель для валидации входных данных запроса
     db: DbDependency, # Зависимость для получения сессии БД
@@ -218,6 +218,7 @@ def register_user(
     """
     Регистрация нового пользователя (Пациента, Врача или Администратора).
     Пользователь будет создан как неактивный и получит ссылку для подтверждения email.
+    Возвращает токен для автоматического входа.
     """
     # Проверяем, существует ли пользователь с таким email в базе данных
     db_user = db.query(User).filter(User.email == user.email).first()
@@ -254,9 +255,13 @@ def register_user(
     # BackgroundTasks позволяют выполнить функцию асинхронно, не блокируя ответ на запрос регистрации.
     background_tasks.add_task(send_verification_email, new_user.email, verification_token)
 
-    # Возвращаем ответ с данными созданного пользователя.
-    # Pydantic UserResponse с from_attributes=True автоматически преобразует объект SQLAlchemy в Pydantic модель.
-    return new_user
+    # Создаем и возвращаем JWT токен для автоматического входа
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_user.email, "role": new_user.role},
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # Эндпоинт для авторизации (получения JWT токена). Не требует авторизации, но проверяет учетные данные.
@@ -321,11 +326,12 @@ def read_users_me(current_user: CurrentUser):
 
 # --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПОДТВЕРЖДЕНИЯ EMAIL ---
 # Доступен по ссылке из письма, не требует авторизации.
-@app.get("/verify-email")
+@app.get("/verify-email", response_model=Token)
 def verify_email(token: str, db: DbDependency): # Принимает токен как параметр запроса (?token=...)
     """
     Подтверждение email по токену из письма.
     Активирует пользователя, если токен валиден и не просрочен.
+    Возвращает JWT токен для автоматического входа.
     """
     # Настройки времени жизни токена подтверждения email (например, 24 часа)
     # TODO: Вынести это в настройки или переменные окружения
@@ -335,11 +341,25 @@ def verify_email(token: str, db: DbDependency): # Принимает токен 
     user = db.query(User).filter(User.email_verification_token == token).first()
 
     if user is None:
-        # Если токен не найден в базе данных, он недействителен.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, # 400 Bad Request - некорректный запрос/токен
-            detail="Invalid verification token"
-        )
+        # Проверяем, возможно пользователь уже подтвердил email (токен был использован)
+        # Ищем пользователей с is_active=True и отсутствующим токеном
+        active_users = db.query(User).filter(
+            User.is_active == True,
+            User.email_verification_token.is_(None)
+        ).all()
+        
+        # Если есть активные пользователи, возможно один из них использовал данный токен
+        if active_users:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification token. Email may have already been verified."
+            )
+        else:
+            # Если токен не найден в базе данных и нет активных пользователей, он недействителен.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, # 400 Bad Request - некорректный запрос/токен
+                detail="Invalid verification token"
+            )
 
     # Проверяем, не истек ли срок действия токена.
     # Сравниваем текущее время (UTC) с временем создания токена.
@@ -361,9 +381,13 @@ def verify_email(token: str, db: DbDependency): # Принимает токен 
     db.commit()
     db.refresh(user) # Обновляем объект пользователя, чтобы убедиться, что изменения сохранены
 
-    # Возвращаем сообщение об успешном подтверждении.
-    # В реальном приложении фронтенд может перенаправить пользователя на страницу логина после этого запроса.
-    return {"message": "Email successfully verified. You can now log in."}
+    # Создаем и возвращаем JWT токен для автоматического входа
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email, "role": user.role},
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # --- Роуты для профилей ---
@@ -1886,3 +1910,168 @@ def manual_activate_user(activation_data: dict, db: DbDependency):
         "user_email": user.email,
         "is_active": user.is_active
     }
+
+# Эндпоинт для загрузки аватара пользователя
+@app.post("/users/me/avatar", response_model=UserResponse)
+async def upload_avatar(
+    avatar: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Загружает и обновляет аватар пользователя.
+    
+    Args:
+        avatar: Файл изображения аватара
+        db: Сессия базы данных
+        current_user: Текущий аутентифицированный пользователь
+        
+    Returns:
+        UserResponse: Обновленные данные пользователя с путём к аватару
+    """
+    # Проверяем тип файла (только изображения)
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    file_type = avatar.content_type
+    
+    if file_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Только изображения форматов JPEG, PNG, GIF и WEBP разрешены для аватара"
+        )
+    
+    # Создаем директорию для аватаров, если она не существует
+    avatar_dir = os.path.join(UPLOAD_DIR, "avatars")
+    if not os.path.exists(avatar_dir):
+        os.makedirs(avatar_dir)
+    
+    # Генерируем уникальное имя файла
+    file_extension = os.path.splitext(avatar.filename)[1]
+    filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(avatar_dir, filename)
+    
+    # Сохраняем файл
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(avatar.file, buffer)
+    
+    # Если у пользователя уже есть аватар, удаляем старый файл
+    if current_user.avatar_path:
+        old_file_path = os.path.join(os.getcwd(), current_user.avatar_path.lstrip('/'))
+        if os.path.exists(old_file_path):
+            try:
+                os.remove(old_file_path)
+            except Exception as e:
+                print(f"Error removing old avatar: {e}")
+    
+    # Обновляем путь к аватару в базе данных
+    current_user.avatar_path = f"/uploads/avatars/{filename}"
+    db.commit()
+    db.refresh(current_user)
+    
+    return current_user
+
+# Модель для получения списка уведомлений
+class NotificationResponse(BaseModel):
+    id: int
+    title: str
+    message: str
+    type: str
+    is_viewed: bool
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# Класс для списка уведомлений
+class NotificationList(BaseModel):
+    items: List[NotificationResponse]
+
+# Эндпоинт для получения уведомлений пользователя
+@app.get("/notifications", response_model=NotificationList)
+async def get_notifications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Получает список уведомлений для текущего пользователя.
+    """
+    # Получаем заявки на роль врача для текущего пользователя
+    applications = db.query(DoctorApplication).filter(
+        DoctorApplication.user_id == current_user.id
+    ).order_by(DoctorApplication.created_at.desc()).all()
+    
+    # Формируем уведомления на основе заявок
+    notifications = []
+    for app in applications:
+        # Проверяем, просмотрено ли уведомление
+        viewed = db.query(ViewedNotification).filter(
+            ViewedNotification.user_id == current_user.id,
+            ViewedNotification.application_id == app.id
+        ).first() is not None
+        
+        # Формируем заголовок и сообщение в зависимости от статуса заявки
+        title = "Заявка на роль врача"
+        if app.status == "pending":
+            message = "Ваша заявка на роль врача находится на рассмотрении."
+            type_name = "info"
+        elif app.status == "approved":
+            message = "Ваша заявка на роль врача одобрена!"
+            type_name = "success"
+        elif app.status == "rejected":
+            message = f"Ваша заявка на роль врача отклонена. Причина: {app.admin_comment or 'Не указана'}"
+            type_name = "error"
+        else:
+            message = f"Статус заявки изменен на: {app.status}"
+            type_name = "info"
+        
+        # Добавляем уведомление в список
+        notifications.append({
+            "id": app.id,
+            "title": title,
+            "message": message,
+            "type": type_name,
+            "is_viewed": viewed,
+            "created_at": app.created_at
+        })
+    
+    # Возвращаем список уведомлений
+    return {"items": notifications}
+
+# Эндпоинт для отметки уведомления как прочитанного
+@app.post("/notifications/{notification_id}/view", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_notification_as_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Отмечает уведомление как прочитанное.
+    """
+    # Получаем заявку по ID
+    application = db.query(DoctorApplication).filter(
+        DoctorApplication.id == notification_id,
+        DoctorApplication.user_id == current_user.id
+    ).first()
+    
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Уведомление не найдено"
+        )
+    
+    # Проверяем, не было ли уже просмотрено уведомление
+    existing_notification = db.query(ViewedNotification).filter(
+        ViewedNotification.user_id == current_user.id,
+        ViewedNotification.application_id == notification_id
+    ).first()
+    
+    if not existing_notification:
+        # Если нет, создаем новую запись
+        viewed_notification = ViewedNotification(
+            user_id=current_user.id,
+            application_id=notification_id
+        )
+        db.add(viewed_notification)
+        db.commit()
+    
+    # Возвращаем 204 No Content (успешно, но без тела ответа)
+    return None

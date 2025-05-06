@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom'
 import { NextUIProvider } from '@nextui-org/react'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { ThemeProvider } from '@mui/material/styles';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import App from './App'
 
 // Импортируем стили
@@ -36,6 +38,7 @@ if (!rootElement) {
             <ThemeProvider theme={muiTheme}>
               <NextUIProvider>
                 <App />
+                <ToastContainer />
               </NextUIProvider>
             </ThemeProvider>
           </GoogleOAuthProvider>
