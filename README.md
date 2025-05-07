@@ -59,23 +59,23 @@ MedCare - это веб-платформа для онлайн-консульт�
 ### Настройка
 
 #### Клонирование репозитория
-```bash
+    ```bash
 git clone https://github.com/yourusername/medcare.git
 cd medcare
 ```
 
 #### Настройка бэкенда
 1. Создайте и активируйте виртуальное окружение:
-```bash
+    ```bash
 cd backend
-python -m venv venv
+    python -m venv venv
 source venv/bin/activate  # На Windows: venv\Scripts\activate
-```
+    ```
 
 2. Установите зависимости:
-```bash
-pip install -r requirements.txt
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 3. Создайте файл `.env` в директории `backend`:
 ```
@@ -94,21 +94,21 @@ APP_ENV=development
 ```
 
 4. Запустите миграции базы данных:
-```bash
-alembic upgrade head
-```
+    ```bash
+    alembic upgrade head
+    ```
 
 5. Запустите сервер бэкенда:
-```bash
-uvicorn main:app --reload
-```
+    ```bash
+    uvicorn main:app --reload
+    ```
 
 #### Настройка фронтенда
 1. Установите зависимости:
-```bash
+    ```bash
 cd frontend
-npm install
-```
+    npm install
+    ```
 
 2. Создайте файл `.env` в директории `frontend`:
 ```
@@ -117,9 +117,9 @@ VITE_GOOGLE_CLIENT_ID=735617581412-e8ceb269bj7qqrv9sl066q63g5dr5sne.apps.googleu
 ```
 
 3. Запустите сервер разработки:
-```bash
-npm run dev
-```
+    ```bash
+    npm run dev
+    ```
 
 4. Откройте http://localhost:5173 в браузере
 

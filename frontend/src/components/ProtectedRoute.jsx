@@ -9,6 +9,8 @@ import useAuthStore from '../stores/authStore'; // Импортируем наш
 function ProtectedRoute({ allowedRoles }) {
   // Получаем состояние аутентификации из стора
   const { isAuthenticated, isLoading, user, needsProfileUpdate } = useAuthStore();
+  // Получаем ошибку аутентификации, если она есть
+  const authError = useAuthStore(state => state.error);
 
   // Пока идет проверка аутентификации при старте приложения (загрузка из Local Storage и валидация токена на бэкенде)
   // В это время мы еще не знаем точно, авторизован пользователь или нет.
@@ -22,6 +24,12 @@ function ProtectedRoute({ allowedRoles }) {
         </div>
       </div>
     );
+  }
+
+  // Если есть ошибка аутентификации, перенаправляем на страницу логина
+  if (authError) {
+    console.log("Authentication error in ProtectedRoute:", authError);
+    return <Navigate to="/login" replace />;
   }
 
   // После завершения загрузки:

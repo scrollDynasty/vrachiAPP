@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem, Avatar, Chip } from '@nextui-org/react';
 import { toast } from 'react-toastify';
+import { motion } from 'framer-motion';
 
 // Компонент формы для профиля Врача
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Врача.
@@ -22,7 +23,7 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    
    // Состояние для модальных окон
    const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
-   const [isNotificationsModalOpen, setNotificationsModalOpen] = useState(false);
+   const [isPrivacyModalOpen, setPrivacyModalOpen] = useState(false);
    const [isDeleteAccountModalOpen, setDeleteAccountModalOpen] = useState(false);
    
    const [isGoogleAccount, setIsGoogleAccount] = useState(false);
@@ -153,14 +154,14 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
       // Проверяем, что пароли совпадают
       if (newPassword !== confirmPassword) {
          setPasswordError('Пароли не совпадают');
-         return;
+           return;
       }
       
       // Проверяем, что новый пароль достаточно длинный
       if (newPassword.length < 8) {
          setPasswordError('Новый пароль должен содержать минимум 8 символов');
-         return;
-      }
+            return;
+       }
       
       // Здесь будет логика для изменения пароля
       toast.success('Пароль успешно изменен', {
@@ -177,20 +178,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
       setNewPassword('');
       setConfirmPassword('');
       setPasswordModalOpen(false);
-   };
-   
-   // Сохранение настроек уведомлений
-   const handleNotificationsSave = () => {
-      // Здесь будет логика сохранения настроек уведомлений
-      toast.success('Настройки уведомлений сохранены', {
-         position: 'top-right',
-         autoClose: 3000,
-         hideProgressBar: false,
-         closeOnClick: true,
-         pauseOnHover: true,
-         draggable: true
-      });
-      setNotificationsModalOpen(false);
    };
    
    // Удаление аккаунта
@@ -331,15 +318,7 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                            </div>
                            <p className="text-sm text-gray-500 mb-4">Управление email и push-уведомлениями</p>
                            <div className="mt-auto">
-                              <Button 
-                                 color="primary"
-                                 variant="flat"
-                                 className="w-full text-sm"
-                                 size="sm"
-                                 onClick={() => setNotificationsModalOpen(true)}
-                              >
-                                 Настроить уведомления
-                              </Button>
+                              {/* Удаляем кнопку настроек уведомлений */}
                            </div>
                         </div>
                      </CardBody>
@@ -387,8 +366,8 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                               
                               {/* ФИО (только для просмотра) */}
                               <Input
-                                 label="ФИО"
-                                 value={full_name}
+            label="ФИО"
+            value={full_name}
                                  readOnly
                                  variant="bordered"
                                  isDisabled={true}
@@ -398,7 +377,7 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                               {/* Специализация (только для просмотра) */}
                               <Input
                                  label="Специализация"
-                                 value={specialization}
+               value={specialization}
                                  readOnly
                                  variant="bordered"
                                  isDisabled={true}
@@ -407,8 +386,8 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                               
                               {/* Опыт работы (только для просмотра) */}
                               <Input
-                                 label="Опыт работы (лет)"
-                                 value={experience_years}
+            label="Опыт работы (лет)"
+            value={experience_years}
                                  readOnly
                                  variant="bordered"
                                  isDisabled={true}
@@ -422,8 +401,8 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                               
                               {/* Образование (только для просмотра) */}
                               <Textarea
-                                 label="Образование"
-                                 value={education}
+            label="Образование"
+            value={education}
                                  readOnly
                                  variant="bordered"
                                  isDisabled={true}
@@ -498,61 +477,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
             </ModalContent>
          </Modal>
          
-         {/* Модальное окно для настройки уведомлений */}
-         <Modal isOpen={isNotificationsModalOpen} onClose={() => setNotificationsModalOpen(false)}>
-            <ModalContent>
-               <ModalHeader>Настройки уведомлений</ModalHeader>
-               <ModalBody>
-                  <div className="space-y-4">
-                     <div className="flex justify-between items-center py-2">
-                        <div>
-                           <p className="font-medium">Email-уведомления</p>
-                           <p className="text-sm text-gray-500">Получать уведомления на email</p>
-                        </div>
-                        <Switch
-                           checked={emailNotifications}
-                           onChange={(e) => setEmailNotifications(e.target.checked)}
-                        />
-                     </div>
-                     
-                     <Divider />
-                     
-                     <div className="flex justify-between items-center py-2">
-                        <div>
-                           <p className="font-medium">Push-уведомления</p>
-                           <p className="text-sm text-gray-500">Получать уведомления в браузере</p>
-                        </div>
-                        <Switch
-                           checked={pushNotifications}
-                           onChange={(e) => setPushNotifications(e.target.checked)}
-                        />
-                     </div>
-                     
-                     <Divider />
-                     
-                     <div className="flex justify-between items-center py-2">
-                        <div>
-                           <p className="font-medium">Напоминания о консультациях</p>
-                           <p className="text-sm text-gray-500">Получать напоминания о предстоящих консультациях</p>
-                        </div>
-                        <Switch
-                           checked={appointmentReminders}
-                           onChange={(e) => setAppointmentReminders(e.target.checked)}
-                        />
-                     </div>
-                  </div>
-               </ModalBody>
-               <ModalFooter>
-                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)}>
-                     Отмена
-                  </Button>
-                  <Button color="primary" onClick={handleNotificationsSave}>
-                     Сохранить
-                  </Button>
-               </ModalFooter>
-            </ModalContent>
-         </Modal>
-         
          {/* Модальное окно для удаления аккаунта */}
          <Modal isOpen={isDeleteAccountModalOpen} onClose={() => setDeleteAccountModalOpen(false)}>
             <ModalContent>
@@ -569,7 +493,7 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                   </Button>
                   <Button color="danger" onClick={handleDeleteAccount}>
                      Удалить аккаунт
-                  </Button>
+             </Button>
                </ModalFooter>
             </ModalContent>
          </Modal>

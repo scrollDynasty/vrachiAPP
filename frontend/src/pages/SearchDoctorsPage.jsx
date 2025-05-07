@@ -13,27 +13,56 @@ const DoctorCard = ({ doctor, onClick }) => {
       onPress={onClick}
     >
       <CardBody className="p-4">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <div className="flex justify-between items-start">
             <div>
-              <h3 className="text-lg font-semibold">{doctor.full_name || 'Имя не указано'}</h3>
-              <p className="text-default-500">{doctor.specialization}</p>
+              <h3 className="text-lg font-semibold text-gray-800">{doctor.full_name || 'Имя не указано'}</h3>
+              <div className="flex items-center mt-1">
+                <Chip color="primary" variant="flat" size="sm" className="mr-2">{doctor.specialization}</Chip>
+                {doctor.is_verified && (
+                  <Chip color="success" variant="flat" size="sm">Проверенный врач</Chip>
+                )}
+              </div>
             </div>
-            {doctor.is_verified && (
-              <Chip color="success" variant="flat" size="sm">Проверенный врач</Chip>
-            )}
+            <div className="text-xl font-bold text-primary">{doctor.cost_per_consultation} UZS</div>
           </div>
           
-          <div className="mt-2">
-            <p className="text-sm"><span className="font-medium">Район: </span>{doctor.district || 'Не указан'}</p>
-            <p className="text-sm"><span className="font-medium">Опыт: </span>{doctor.experience || 'Не указан'}</p>
+          <Divider className="my-2" />
+          
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            <div className="flex items-center">
+              <div className="w-8 h-8 flex items-center justify-center rounded-full bg-primary-50 mr-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 font-medium">Район</p>
+                <p className="text-sm font-semibold">{doctor.district || 'Не указан'}</p>
+              </div>
+            </div>
+            <div className="flex items-center">
+              <div className="w-8 h-8 flex items-center justify-center rounded-full bg-primary-50 mr-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 font-medium">Опыт</p>
+                <p className="text-sm font-semibold">{doctor.experience || 'Не указан'}</p>
+              </div>
+            </div>
           </div>
         </div>
       </CardBody>
-      <Divider />
-      <CardFooter className="flex justify-between">
-        <div className="font-semibold">{doctor.cost_per_consultation} UZS</div>
-        <div className="text-sm text-primary">Просмотреть профиль</div>
+      <CardFooter className="bg-gray-50 py-3 px-4">
+        <div className="text-sm text-primary-600 font-medium flex items-center">
+          Просмотреть профиль
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
       </CardFooter>
     </Card>
   );

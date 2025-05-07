@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Switch, Select, SelectItem, Avatar } from '@nextui-org/react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-toastify';
+import { notificationsApi } from '../api'; // Импортируем API для уведомлений
+import api from '../api'; // Импортируем основной API для получения CSRF токена
 
 // Анимационные варианты для элементов
 const fadeIn = {
@@ -55,6 +57,11 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    const [emailNotifications, setEmailNotifications] = useState(true);
    const [pushNotifications, setPushNotifications] = useState(true);
    const [appointmentReminders, setAppointmentReminders] = useState(true);
+   const [isLoadingNotificationSettings, setIsLoadingNotificationSettings] = useState(false);
+
+   // Состояние для CSRF токена
+   const [csrfToken, setCsrfToken] = useState('');
+   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
    // Предзаполнение формы при получении данных профиля
    useEffect(() => {
@@ -86,8 +93,43 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          setProfileImage(savedImage);
       }
       
-      setFormLocalError(null);
+       setFormLocalError(null);
    }, [profile]);
+
+   // Загрузка настроек уведомлений при монтировании компонента
+   useEffect(() => {
+      const fetchNotificationSettings = async () => {
+         if (!profile) return;
+         
+         setIsLoadingNotificationSettings(true);
+         try {
+            const settings = await notificationsApi.getNotificationSettings();
+            setEmailNotifications(settings.email_notifications);
+            setPushNotifications(settings.push_notifications);
+            setAppointmentReminders(settings.appointment_reminders);
+         } catch (error) {
+            console.error('Ошибка при загрузке настроек уведомлений:', error);
+         } finally {
+            setIsLoadingNotificationSettings(false);
+         }
+      };
+      
+      fetchNotificationSettings();
+   }, [profile]);
+
+   // При монтировании компонента получаем CSRF токен
+   useEffect(() => {
+      const fetchCsrfToken = async () => {
+         try {
+            const response = await api.get('/csrf-token');
+            setCsrfToken(response.data.csrf_token);
+         } catch (error) {
+            console.error('Ошибка при получении CSRF токена:', error);
+         }
+      };
+      
+      fetchCsrfToken();
+   }, []);
 
    // Обработчик отправки формы
    const handleSubmit = (event) => {
@@ -135,36 +177,41 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    };
    
    // Обработчик изменения пароля
-   const handleChangePassword = (event) => {
+   const handleChangePassword = async (event) => {
       event.preventDefault();
       setPasswordError(null);
+      setIsChangingPassword(true);
       
-      // Валидация
-      if (!currentPassword) {
-         setPasswordError("Пожалуйста, введите текущий пароль");
-         return;
-      }
-      
-      if (!newPassword) {
-         setPasswordError("Пожалуйста, введите новый пароль");
-         return;
-      }
-      
-      if (newPassword.length < 8) {
-         setPasswordError("Новый пароль должен содержать минимум 8 символов");
-         return;
-      }
-      
-      if (newPassword !== confirmPassword) {
-         setPasswordError("Пароли не совпадают");
-         return;
-      }
-      
-      // Здесь будет вызов API для смены пароля
-      console.log("Отправка запроса на смену пароля");
-      
-      // Заглушка для демонстрации
-      setTimeout(() => {
+      try {
+         // Валидация
+         if (!currentPassword) {
+            setPasswordError("Пожалуйста, введите текущий пароль");
+            return;
+         }
+         
+         if (!newPassword) {
+            setPasswordError("Пожалуйста, введите новый пароль");
+            return;
+         }
+         
+         if (newPassword.length < 8) {
+            setPasswordError("Новый пароль должен содержать минимум 8 символов");
+            return;
+         }
+         
+         if (newPassword !== confirmPassword) {
+            setPasswordError("Пароли не совпадают");
+            return;
+         }
+         
+         // Отправляем запрос на смену пароля с CSRF токеном
+         await api.post('/users/me/change-password', {
+            csrf_token: csrfToken,
+            current_password: currentPassword,
+            new_password: newPassword
+         });
+         
+         // Показываем уведомление об успешной смене пароля
          toast.success('Пароль успешно изменен', {
             position: 'top-right',
             autoClose: 3000,
@@ -178,9 +225,22 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          setCurrentPassword('');
          setNewPassword('');
          setConfirmPassword('');
+         
          // Закрываем модальное окно
          setPasswordModalOpen(false);
-      }, 1500);
+         
+         // Получаем новый CSRF токен после успешной операции
+         const response = await api.get('/csrf-token');
+         setCsrfToken(response.data.csrf_token);
+      } catch (error) {
+         console.error('Ошибка при смене пароля:', error);
+         
+         // Получаем сообщение ошибки из ответа сервера, если оно есть
+         const errorMessage = error.response?.data?.detail || 'Не удалось изменить пароль. Попробуйте позже';
+         setPasswordError(errorMessage);
+      } finally {
+         setIsChangingPassword(false);
+      }
    };
    
    // Обработчик загрузки изображения
@@ -213,18 +273,43 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
       avatarInputRef.current?.click();
    };
    
-   // Добавляем обработчик сохранения настроек уведомлений
-   const handleNotificationsSave = () => {
-      // Здесь будет логика сохранения настроек уведомлений
-      toast.success('Настройки уведомлений сохранены', {
-         position: 'top-right',
-         autoClose: 3000,
-         hideProgressBar: false,
-         closeOnClick: true,
-         pauseOnHover: true,
-         draggable: true
-      });
-      setNotificationsModalOpen(false);
+   // Добавляем обработчик сохранения настроек уведомлений с CSRF защитой
+   const handleNotificationsSave = async () => {
+      setIsLoadingNotificationSettings(true);
+      try {
+         // Отправляем запрос на обновление настроек с CSRF токеном
+         await notificationsApi.updateNotificationSettings({
+            csrf_token: csrfToken,
+            email_notifications: emailNotifications,
+            push_notifications: pushNotifications,
+            appointment_reminders: appointmentReminders
+         });
+         
+         // Показываем уведомление об успешном сохранении
+         toast.success('Настройки уведомлений сохранены', {
+            position: 'top-right',
+            autoClose: 3000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true
+         });
+         
+         // Закрываем модальное окно
+         setNotificationsModalOpen(false);
+         
+         // Получаем новый CSRF токен после успешной операции
+         const response = await api.get('/csrf-token');
+         setCsrfToken(response.data.csrf_token);
+      } catch (error) {
+         console.error('Ошибка при сохранении настроек уведомлений:', error);
+         toast.error('Не удалось сохранить настройки. Попробуйте позже', {
+            position: 'top-right',
+            autoClose: 3000
+         });
+      } finally {
+         setIsLoadingNotificationSettings(false);
+      }
    };
 
    // Добавляем обработчик удаления аккаунта
@@ -423,8 +508,8 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                   <Input
                      label="Контактный телефон"
                      placeholder="Введите ваш телефон"
-                     value={contact_phone}
-                     onChange={(e) => setContactPhone(e.target.value)}
+            value={contact_phone}
+            onChange={(e) => setContactPhone(e.target.value)}
                      variant="bordered"
                      radius="sm"
                      labelPlacement="outside"
@@ -439,10 +524,10 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                
                <motion.div variants={slideUp}>
                   <Input
-                     label="Адрес"
+            label="Адрес"
                      placeholder="Введите ваш адрес"
-                     value={contact_address}
-                     onChange={(e) => setContactAddress(e.target.value)}
+            value={contact_address}
+            onChange={(e) => setContactAddress(e.target.value)}
                      variant="bordered"
                      radius="sm"
                      labelPlacement="outside"
@@ -589,7 +674,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                   </Button>
                   
                   {/* Кнопка удаления аккаунта */}
-                  <Button
+             <Button
                      color="danger"
                      variant="light"
                      startContent={
@@ -607,66 +692,73 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          )}
          
          {/* Модальное окно смены пароля */}
-         <Modal isOpen={isPasswordModalOpen} onClose={() => setPasswordModalOpen(false)}>
+         <Modal isOpen={isPasswordModalOpen} onClose={() => !isChangingPassword && setPasswordModalOpen(false)}>
             <ModalContent>
-               <ModalHeader className="flex flex-col gap-1">
-                  <h2 className="text-xl text-primary">Изменение пароля</h2>
-               </ModalHeader>
-               <ModalBody>
-                  {passwordError && (
-                     <div className="bg-danger-50 text-danger p-3 rounded-lg mb-4">
-                        {passwordError}
-                     </div>
-                  )}
-                  
-                  <form onSubmit={handleChangePassword}>
-                     <div className="space-y-4">
+               {(onClose) => (
+                  <>
+                     <ModalHeader className="flex flex-col gap-1">
+                        <h2 className="text-xl font-semibold">Изменение пароля</h2>
+                     </ModalHeader>
+                     <ModalBody>
+                        {passwordError && (
+                           <div className="bg-red-50 p-3 rounded-lg mb-3 text-red-600 border border-red-200">
+                              {passwordError}
+                           </div>
+                        )}
+                        
                         <Input
                            type="password"
                            label="Текущий пароль"
-                           placeholder="Введите текущий пароль"
                            value={currentPassword}
                            onChange={(e) => setCurrentPassword(e.target.value)}
-                           variant="bordered"
+                           placeholder="Введите текущий пароль"
+                           fullWidth
+                           size="lg"
+                           autoComplete="current-password"
+                           isDisabled={isChangingPassword}
                         />
                         
                         <Input
                            type="password"
                            label="Новый пароль"
-                           placeholder="Минимум 8 символов"
                            value={newPassword}
                            onChange={(e) => setNewPassword(e.target.value)}
-                           variant="bordered"
+                           placeholder="Минимум 8 символов"
+                           fullWidth
+                           size="lg"
+                           autoComplete="new-password"
+                           isDisabled={isChangingPassword}
                         />
                         
                         <Input
                            type="password"
-                           label="Подтвердите новый пароль"
-                           placeholder="Повторите новый пароль"
+                           label="Подтверждение нового пароля"
                            value={confirmPassword}
                            onChange={(e) => setConfirmPassword(e.target.value)}
-                           variant="bordered"
+                           placeholder="Повторите новый пароль"
+                           fullWidth
+                           size="lg"
+                           autoComplete="new-password"
+                           isDisabled={isChangingPassword}
                         />
-                     </div>
-                  </form>
-               </ModalBody>
-               <ModalFooter>
-                  <Button color="default" variant="light" onClick={() => setPasswordModalOpen(false)}>
-                     Отмена
-                  </Button>
-                  <Button color="primary" onClick={handleChangePassword}>
-                     Сохранить пароль
-                  </Button>
-               </ModalFooter>
+                     </ModalBody>
+                     <ModalFooter>
+                        <Button color="default" variant="light" onPress={onClose} isDisabled={isChangingPassword}>
+                           Отмена
+                        </Button>
+                        <Button color="primary" onPress={handleChangePassword} isLoading={isChangingPassword}>
+                           Изменить пароль
+                        </Button>
+                     </ModalFooter>
+                  </>
+               )}
             </ModalContent>
          </Modal>
          
          {/* Модальное окно настроек уведомлений */}
-         <Modal isOpen={isNotificationsModalOpen} onClose={() => setNotificationsModalOpen(false)}>
+         <Modal isOpen={isNotificationsModalOpen} onClose={() => !isLoadingNotificationSettings && setNotificationsModalOpen(false)}>
             <ModalContent>
-               <ModalHeader className="flex flex-col gap-1">
-                  <h2 className="text-xl text-primary">Настройки уведомлений</h2>
-               </ModalHeader>
+               <ModalHeader>Настройки уведомлений</ModalHeader>
                <ModalBody>
                   <div className="space-y-4">
                      <div className="flex justify-between items-center">
@@ -678,6 +770,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                            isSelected={emailNotifications}
                            onValueChange={setEmailNotifications}
                            color="primary"
+                           isDisabled={isLoadingNotificationSettings}
                         />
                      </div>
                      
@@ -690,6 +783,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                            isSelected={pushNotifications}
                            onValueChange={setPushNotifications}
                            color="primary"
+                           isDisabled={isLoadingNotificationSettings}
                         />
                      </div>
                      
@@ -702,15 +796,16 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                            isSelected={appointmentReminders}
                            onValueChange={setAppointmentReminders}
                            color="primary"
+                           isDisabled={isLoadingNotificationSettings}
                         />
                      </div>
                   </div>
                </ModalBody>
                <ModalFooter>
-                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)}>
+                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)} isDisabled={isLoadingNotificationSettings}>
                      Отмена
                   </Button>
-                  <Button color="primary" onClick={handleNotificationsSave}>
+                  <Button color="primary" onClick={handleNotificationsSave} isLoading={isLoadingNotificationSettings}>
                      Сохранить
                   </Button>
                </ModalFooter>
@@ -789,7 +884,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                   </Button>
                   <Button color="danger" onClick={handleDeleteAccount}>
                      Удалить аккаунт
-                  </Button>
+             </Button>
                </ModalFooter>
             </ModalContent>
          </Modal>

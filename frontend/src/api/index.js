@@ -151,6 +151,57 @@ export const notificationsApi = {
       console.error(`Ошибка при отметке уведомления о заявке ${applicationId} как просмотренного:`, error);
       return false; // Ошибка
     }
+  },
+  
+  // Получение настроек уведомлений пользователя
+  getNotificationSettings: async () => {
+    try {
+      const response = await api.get('/users/me/notification-settings');
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при получении настроек уведомлений:', error);
+      // Возвращаем настройки по умолчанию, если произошла ошибка
+      return {
+        email_notifications: true,
+        push_notifications: true,
+        appointment_reminders: true
+      };
+    }
+  },
+  
+  // Обновление настроек уведомлений пользователя
+  updateNotificationSettings: async (settings) => {
+    try {
+      const response = await api.put('/users/me/notification-settings', settings);
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при обновлении настроек уведомлений:', error);
+      throw error;
+    }
+  }
+};
+
+// Получение списка районов Ташкента
+api.getDistricts = async () => {
+  try {
+    const response = await api.get('/api/districts');
+    return response.data;
+  } catch (error) {
+    console.error('Ошибка при получении списка районов:', error);
+    // Возвращаем статический список районов в случае ошибки
+    return [
+      "Алмазарский район",
+      "Бектемирский район",
+      "Мирабадский район",
+      "Мирзо-Улугбекский район",
+      "Сергелийский район",
+      "Учтепинский район",
+      "Чиланзарский район",
+      "Шайхантаурский район",
+      "Юнусабадский район",
+      "Яккасарайский район",
+      "Яшнабадский район"
+    ];
   }
 };
 

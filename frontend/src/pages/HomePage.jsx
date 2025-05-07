@@ -1,5 +1,5 @@
 // frontend/src/pages/HomePage.jsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardBody, Button } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
@@ -7,11 +7,48 @@ import GoogleProfileForm from '../components/GoogleProfileForm';
 import { ApplicationStatusTracker } from '../components/Notification';
 
 function HomePage() {
-  const { user, needsProfileUpdate } = useAuthStore();
+  const { user, needsProfileUpdate, token, isAuthenticated, isLoading } = useAuthStore();
   const navigate = useNavigate();
+  const authError = useAuthStore(state => state.error);
+  
+  // Добавляем log при монтировании компонента
+  useEffect(() => {
+    console.log('HomePage: Mounted with user state:', {
+      hasUser: !!user,
+      needsProfileUpdate,
+      hasToken: !!token,
+      isAuthenticated,
+      isLoading,
+      userData: user
+    });
+  }, [user, needsProfileUpdate, token, isAuthenticated, isLoading]);
+  
+  // Перенаправляем на страницу логина, если есть ошибка аутентификации
+  useEffect(() => {
+    if (authError) {
+      console.log("HomePage: Authentication error detected, redirecting to login page");
+      navigate('/login');
+    }
+  }, [authError, navigate]);
+  
+  // Логи на каждое изменение ключевых данных
+  useEffect(() => {
+    console.log('HomePage: User state changed:', {
+      hasUser: !!user,
+      userData: user,
+      isAuthenticated
+    });
+  }, [user, isAuthenticated]);
+  
+  // Если есть ошибка аутентификации, не рендерим содержимое страницы
+  if (authError) {
+    console.log('HomePage: Not rendering due to auth error');
+    return null;
+  }
   
   // Если требуется обновление профиля, показываем форму
   if (needsProfileUpdate) {
+    console.log('HomePage: Showing profile update form');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-50 to-indigo-50 py-12 px-4">
         <div className="w-full max-w-2xl">
@@ -20,6 +57,8 @@ function HomePage() {
       </div>
     );
   }
+  
+  console.log('HomePage: Rendering main content with user role:', user?.role);
   
   // Если пользователь администратор, показываем специальную страницу администратора
   if (user?.role === 'admin') {
@@ -137,6 +176,8 @@ function HomePage() {
   
   // Выбираем набор карточек в зависимости от роли
   const serviceCards = user?.role === 'doctor' ? doctorCards : patientCards;
+
+  console.log('HomePage: Rendering content');
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">

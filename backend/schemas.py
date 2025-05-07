@@ -12,7 +12,11 @@ class UserCreate(BaseModel):
     email: EmailStr # FastAPI/Pydantic автоматически проверит, что это валидный email
     password: str = Field(..., min_length=8) # Пароль, обязателен, мин. длина 8 символов
     # Role validation: must be 'patient', 'doctor', or 'admin'
-    role: str = Field(..., pattern="^(patient|doctor|admin)$")
+    role: str = Field("patient", pattern="^(patient|doctor|admin)$")
+    # Дополнительные поля для создания профиля
+    full_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    district: Optional[str] = None
 
 
 # Модель для данных, возвращаемых после регистрации и при получении информации о пользователе (включая is_active)
@@ -163,6 +167,8 @@ class DoctorBrief(BaseModel):
     full_name: Optional[str]     # ФИО врача
     specialization: str          # Специализация
     cost_per_consultation: int   # Стоимость консультации
+    district: Optional[str] = None  # Район практики врача
+    experience: Optional[str] = None  # Опыт работы врача
     is_verified: bool            # Статус верификации
 
     class Config:

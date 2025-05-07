@@ -1,101 +1,32 @@
 # backend/main.py
 import os
-import uuid  # Импортируем uuid для генерации токенов
-import shutil  # Добавляем для работы с файлами
-from fastapi import (
-    FastAPI,
-    Depends,
-    HTTPException,
-    status,
-    APIRouter,
-    BackgroundTasks,
-    Query,
-    File,
-    UploadFile,
-    Form,
-)  # Добавляем BackgroundTasks для фоновых задач и Query для поиска
-from fastapi.security import (
-    OAuth2PasswordRequestForm,
-    OAuth2PasswordBearer,
-)  # Добавляем OAuth2PasswordRequestForm и OAuth2PasswordBearer
+import uuid # Импортируем uuid для генерации токенов
+import shutil # Добавляем для работы с файлами
+from fastapi import FastAPI, Depends, HTTPException, status, APIRouter, BackgroundTasks, Query, File, UploadFile, Form # Добавляем BackgroundTasks для фоновых задач и Query для поиска
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer # Добавляем OAuth2PasswordRequestForm и OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Optional, Union
-from datetime import timedelta, datetime  # Импортируем timedelta и datetime
+from datetime import timedelta, datetime # Импортируем timedelta и datetime
 from fastapi.middleware.cors import CORSMiddleware
 import smtplib  # Для SMTP-соединения
 from email.mime.text import MIMEText  # Для создания email
 from email.mime.multipart import MIMEMultipart  # Для создания составных email
 from math import ceil
-from pydantic import BaseModel, ValidationError  # Для моделей данных и валидации
-from fastapi.staticfiles import StaticFiles  # Для раздачи статических файлов
+from pydantic import BaseModel  # Для моделей данных
+from fastapi.staticfiles import StaticFiles # Для раздачи статических файлов
 import secrets
 import time
 
 # Импортируем наши модели и функцию для получения сессии БД
-from models import (
-    User,
-    PatientProfile,
-    DoctorProfile,
-    get_db,
-    DATABASE_URL,
-    engine,
-    Base,
-    DoctorApplication,
-    SessionLocal,
-    ViewedNotification,
-    Consultation,
-    Message,
-    Review,
-    UserNotificationSettings,
-)  # Добавляем UserNotificationSettings
-
+from models import User, PatientProfile, DoctorProfile, get_db, DATABASE_URL, engine, Base, DoctorApplication, SessionLocal, ViewedNotification, Consultation, Message, Review, UserNotificationSettings # Добавляем UserNotificationSettings
 # Импортируем функции для работы с паролями и JWT, а также зависимости для аутентификации и ролей
 # get_current_user и require_role используются как зависимости в эндпоинтах
-from auth import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
-    SECRET_KEY,
-    ALGORITHM,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    get_current_user,
-    require_role,
-    authenticate_user,
-    get_current_active_user,
-    SECURE_TOKEN_LENGTH,
-    Token as TokenModel,
-    verify_google_token,
-    authenticate_google_user,
-    create_csrf_token,
-    verify_csrf_token,
-    check_login_attempts,
-    LOGIN_ATTEMPTS,
-    increment_login_attempts,
-    reset_login_attempts,
-)
+from auth import get_password_hash, verify_password, create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, require_role, authenticate_user, get_current_active_user, SECURE_TOKEN_LENGTH, Token as TokenModel, verify_google_token, authenticate_google_user, create_csrf_token, verify_csrf_token, check_login_attempts, LOGIN_ATTEMPTS
 
 # Импортируем pydantic модели для валидации данных запросов и ответов
-from schemas import (
-    UserCreate,
-    UserResponse,
-    Token,
-    PatientProfileCreateUpdate,
-    PatientProfileResponse,
-    DoctorProfileCreateUpdate,
-    DoctorProfileResponse,
-    Field,
-    DoctorFilter,
-    DoctorBrief,
-    DoctorDetail,
-    DoctorListResponse,
-    DoctorApplicationCreate,
-    DoctorApplicationResponse,
-    DoctorApplicationProcessRequest,
-    DoctorApplicationListResponse,
-)  # Импортируем Field (хотя он нужен только в schemas.py), DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse
+from schemas import UserCreate, UserResponse, Token, PatientProfileCreateUpdate, PatientProfileResponse, DoctorProfileCreateUpdate, DoctorProfileResponse, Field, DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse, DoctorApplicationCreate, DoctorApplicationResponse, DoctorApplicationProcessRequest, DoctorApplicationListResponse # Импортируем Field (хотя он нужен только в schemas.py), DoctorFilter, DoctorBrief, DoctorDetail, DoctorListResponse
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 # Создаем директорию для загрузки файлов, если она еще не существует
@@ -116,9 +47,7 @@ for directory in [PHOTO_DIR, DIPLOMA_DIR, LICENSE_DIR]:
 
 # Определяем базовый URL для подтверждения email (адрес страницы фронтенда, куда пользователь перейдет по ссылке из письма)
 # В реальном проекте это должна быть переменная окружения, читаемая из .env!
-VERIFICATION_BASE_URL = os.getenv(
-    "VERIFICATION_BASE_URL", "http://localhost:5173/verify-email"
-)  # <-- TODO: Замени на актуальный URL твоего фронтенда!
+VERIFICATION_BASE_URL = os.getenv("VERIFICATION_BASE_URL", "http://localhost:5173/verify-email") # <-- TODO: Замени на актуальный URL твоего фронтенда!
 
 # Email конфигурация
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
@@ -156,7 +85,7 @@ try:
                 email="admin@medcare.com",
                 hashed_password=admin_password,
                 is_active=True,
-                role="admin",
+                role="admin"
             )
             db.add(admin_user)
             db.commit()
@@ -165,21 +94,21 @@ except Exception as e:
     print(f"Error creating default admin: {e}")
 
 
-app = FastAPI()  # Создаем экземпляр FastAPI приложения
+app = FastAPI() # Создаем экземпляр FastAPI приложения
 origins = [
-    "http://localhost",  # Разрешаем доступ с localhost (обычно для статики)
-    "http://localhost:5173",  # <--- РАЗРЕШАЕМ ДОСТУП С НАШЕГО ФРОНТЕНДА НА VITE!
-    "http://127.0.0.1",  # Разрешаем доступ с 127.0.0.1 (аналог localhost)
-    "http://127.0.0.1:5173",  # <--- РАЗРЕШАЕМ ДОСТУП С НАШЕГО ФРОНТЕНДА НА VITE (через 127.0.0.1)!
+    "http://localhost", # Разрешаем доступ с localhost (обычно для статики)
+    "http://localhost:5173", # <--- РАЗРЕШАЕМ ДОСТУП С НАШЕГО ФРОНТЕНДА НА VITE!
+    "http://127.0.0.1", # Разрешаем доступ с 127.0.0.1 (аналог localhost)
+    "http://127.0.0.1:5173", # <--- РАЗРЕШАЕМ ДОСТУП С НАШЕГО ФРОНТЕНДА НА VITE (через 127.0.0.1)!
     # TODO: Добавить другие источники, если фронтенд будет доступен по другому адресу или порту
     # TODO: В продакшене здесь должен быть домен твоего сайта!
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Список разрешенных источников
-    allow_credentials=True,  # Разрешаем использование cookie и учетных данных в запросах (например, для будущих сессий, хотя сейчас используем JWT)
-    allow_methods=["*"],  # Разрешаем все HTTP методы (GET, POST, PUT, DELETE и т.д.)
-    allow_headers=["*"],  # Разрешаем все заголовки в запросах (включая Authorization)
+    allow_origins=origins, # Список разрешенных источников
+    allow_credentials=True, # Разрешаем использование cookie и учетных данных в запросах (например, для будущих сессий, хотя сейчас используем JWT)
+    allow_methods=["*"], # Разрешаем все HTTP методы (GET, POST, PUT, DELETE и т.д.)
+    allow_headers=["*"], # Разрешаем все заголовки в запросах (включая Authorization)
 )
 
 # Монтируем StaticFiles для доступа к загруженным файлам
@@ -201,20 +130,20 @@ def send_verification_email(email: str, token: str):
     Args:
         email (str): Email пользователя
         token (str): Токен для подтверждения
-
+        
     Note:
         В продакшене данная функция должна использовать реальный SMTP сервер.
     """
     # Формируем ссылку для подтверждения
     verification_link = f"{VERIFICATION_BASE_URL}?token={token}"
-
+    
     try:
         # Создаем объект сообщения
         msg = MIMEMultipart()
-        msg["From"] = EMAIL_FROM
-        msg["To"] = email
-        msg["Subject"] = "Подтверждение регистрации в MedCare"
-
+        msg['From'] = EMAIL_FROM
+        msg['To'] = email
+        msg['Subject'] = "Подтверждение регистрации в MedCare"
+        
         # Создаем HTML-тело письма
         html = f"""
         <html>
@@ -235,45 +164,38 @@ def send_verification_email(email: str, token: str):
             </body>
         </html>
         """
-
+        
         # Добавляем HTML-часть к сообщению
-        msg.attach(MIMEText(html, "html"))
-
+        msg.attach(MIMEText(html, 'html'))
+        
         # Устанавливаем соединение с SMTP-сервером
-        print(f"Trying to connect to SMTP server: {EMAIL_HOST}:{EMAIL_PORT}")
         server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
         server.starttls()  # Включаем шифрование
-
+        
         # Авторизуемся на сервере
-        print(f"Logging in to SMTP server with username: {EMAIL_USERNAME}")
         server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-
+        
         # Отправляем письмо
-        print(f"Sending email to: {email}")
         server.send_message(msg)
-
+        
         # Закрываем соединение
         server.quit()
-
-        print(f"Verification email successfully sent to: {email}")
+        
+        print(f"Verification email sent to: {email}")
         print(f"Link: {verification_link}")
-
+        
     except Exception as e:
         # В случае ошибки отправки, выводим ошибку в консоль
-        print(f"Error sending email: {str(e)}")
-        print(f"SMTP settings: Host={EMAIL_HOST}, Port={EMAIL_PORT}, Username={EMAIL_USERNAME}")
-        print(f"Make sure your email provider allows app passwords or less secure apps")
-
+        print(f"Error sending email: {e}")
+        
         # Выводим ссылку в консоль (как запасной вариант)
         print(f"\n--- EMAIL VERIFICATION FAILED, SHOWING LINK ---")
-        print(f"To: {email}")
-        print(f"Subject: Confirm your email address")
-        print(f"Link: {verification_link}")
-        print(f"--------------------------------------------\n")
-
+    print(f"To: {email}")
+    print(f"Subject: Confirm your email address")
+    print(f"Link: {verification_link}")
+    print(f"--------------------------------------------\n")
 
 # --- Роуты для базовых пользователей и аутентификации ---
-
 
 # Эндпоинт для тестовой проверки статуса сервера. Не требует авторизации.
 @app.get("/status")
@@ -285,228 +207,178 @@ def get_status():
 
 
 # Эндпоинт для регистрации нового пользователя. Не требует авторизации.
-@app.post(
-    "/register", response_model=Token, status_code=status.HTTP_201_CREATED
-)  # Изменяем ответ на Token вместо UserResponse
+@app.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED) # Изменяем ответ на Token вместо UserResponse
 def register_user(
-    user: UserCreate,  # Pydantic модель для валидации входных данных запроса
-    db: DbDependency,  # Зависимость для получения сессии БД
-    background_tasks: BackgroundTasks,  # Зависимость для выполнения задач в фоновом режиме (например, отправки письма)
+    user: UserCreate, # Pydantic модель для валидации входных данных запроса
+    db: DbDependency, # Зависимость для получения сессии БД
+    background_tasks: BackgroundTasks # Зависимость для выполнения задач в фоновом режиме (например, отправки письма)
 ):
     """
     Регистрация нового пользователя (Пациента, Врача или Администратора).
     Пользователь будет создан как неактивный и получит ссылку для подтверждения email.
     Возвращает токен для автоматического входа.
     """
-    try:
-        print(f"Received registration request for email: {user.email}, role: {user.role}")
-        
-        # Проверяем, существует ли пользователь с таким email в базе данных
-        db_user = db.query(User).filter(User.email == user.email).first()
-        if db_user:
-            # Проверяем, через какой провайдер был зарегистрирован пользователь
-            if db_user.auth_provider == "google":
-                print(f"User {user.email} already registered with Google")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Этот email уже зарегистрирован через Google. Пожалуйста, используйте вход через Google.",
-                )
-            else:
-                print(f"User {user.email} already registered with email")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Этот email уже зарегистрирован. Пожалуйста, войдите или используйте восстановление пароля.",
-                )
-
-        # Хешируем пароль перед сохранением в базе данных. НИКОГДА не храните пароли в открытом виде!
-        hashed_password = get_password_hash(user.password)
-
-        # Проверяем сложность пароля
-        if len(user.password) < 8:
-            print(f"Password too short for {user.email}")
+    # Проверяем, существует ли пользователь с таким email в базе данных
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        # Проверяем, через какой провайдер был зарегистрирован пользователь
+        if db_user.auth_provider == "google":
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пароль должен содержать минимум 8 символов",
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="This email is already registered with Google. Please use Google login."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Email already registered. Please login or use password recovery if needed."
             )
 
-        # Проверяем, что указана допустимая роль
-        if user.role not in ["patient", "doctor"]:
-            print(f"Invalid role specified: {user.role}")
-            # Устанавливаем роль "patient" по умолчанию
-            user.role = "patient"
-            print(f"Defaulting to patient role for {user.email}")
+    # Хешируем пароль перед сохранением в базе данных. НИКОГДА не храните пароли в открытом виде!
+    hashed_password = get_password_hash(user.password)
 
-        # Генерируем уникальный токен подтверждения email (используем UUID - Universally Unique Identifier)
-        verification_token = str(uuid.uuid4())
-        # Сохраняем метку времени создания токена (для проверки срока действия)
-        token_created_at = datetime.utcnow()
-
-        print(f"Creating new user: {user.email} with role: {user.role}")
-        
-        # Создаем новый объект пользователя SQLAlchemy на основе данных из запроса и сгенерированных полей
-        new_user = User(
-            email=user.email,
-            hashed_password=hashed_password,
-            is_active=False,  # <--- Новый пользователь создается как НЕАКТИВНЫЙ
-            role=user.role,
-            auth_provider="email",  # Явно указываем, что пользователь зарегистрирован через email
-            email_verification_token=verification_token,  # Сохраняем токен подтверждения в БД
-            email_verification_token_created_at=token_created_at,  # Сохраняем время создания токена в БД
-        )
-
-        # Добавляем нового пользователя в сессию базы данных и сохраняем изменения (commit)
-        db.add(new_user)
-        db.commit()
-        # Обновляем объект new_user, чтобы получить сгенерированный базой данных id и другие актуальные поля
-        db.refresh(new_user)
-
-        print(f"User {user.email} created with ID: {new_user.id} and role: {new_user.role}")
-        
-        # Создаем профиль пациента при регистрации, если передана информация о профиле
-        if user.role == "patient":
-            # Получаем данные профиля из запроса
-            try:
-                # В новых версиях Pydantic используется model_dump() вместо dict()
-                user_data = user.model_dump()
-            except AttributeError:
-                # Для обратной совместимости со старыми версиями
-                user_data = user.dict()
-                
-            full_name = user_data.get("full_name", None)
-            contact_phone = user_data.get("contact_phone", None)
-            district = user_data.get("district", None)
-            
-            # Если есть данные для профиля, создаем его
-            if full_name or contact_phone or district:
-                print(f"Creating patient profile for user {new_user.id}")
-                patient_profile = PatientProfile(
-                    user_id=new_user.id,
-                    full_name=full_name,
-                    contact_phone=contact_phone,
-                    district=district
-                )
-                db.add(patient_profile)
-                db.commit()
-                print(f"Patient profile created for user {new_user.id}")
-        
-        # Отправляем письмо с подтверждением email в фоновом режиме.
-        # BackgroundTasks позволяют выполнить функцию асинхронно, не блокируя ответ на запрос регистрации.
-        print(f"Adding background task to send verification email to {new_user.email}")
-        background_tasks.add_task(
-            send_verification_email, new_user.email, verification_token
-        )
-
-        # Создаем и возвращаем JWT токен для автоматического входа
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": new_user.email, "role": new_user.role},
-            expires_delta=access_token_expires,
-        )
-        
-        print(f"Registration successful for {user.email} with role: {new_user.role}")
-        return {"access_token": access_token, "token_type": "bearer"}
-        
-    except ValidationError as e:
-        print(f"Validation error during registration: {str(e)}")
+    # Проверяем сложность пароля
+    if len(user.password) < 8:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Ошибка валидации: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long"
         )
-    except HTTPException as e:
-        print(f"HTTP error during registration: {e.status_code} - {e.detail}")
-        raise e
-    except Exception as e:
-        print(f"Unexpected error during registration: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Произошла непредвиденная ошибка при регистрации. Пожалуйста, попробуйте позже."
-        )
+
+    # Генерируем уникальный токен подтверждения email (используем UUID - Universally Unique Identifier)
+    verification_token = str(uuid.uuid4())
+    # Сохраняем метку времени создания токена (для проверки срока действия)
+    token_created_at = datetime.utcnow()
+
+    # Создаем новый объект пользователя SQLAlchemy на основе данных из запроса и сгенерированных полей
+    new_user = User(
+        email=user.email,
+        hashed_password=hashed_password,
+        is_active=False, # <--- Новый пользователь создается как НЕАКТИВНЫЙ
+        role=user.role,
+        auth_provider="email", # Явно указываем, что пользователь зарегистрирован через email
+        email_verification_token=verification_token, # Сохраняем токен подтверждения в БД
+        email_verification_token_created_at=token_created_at # Сохраняем время создания токена в БД
+    )
+
+    # Добавляем нового пользователя в сессию базы данных и сохраняем изменения (commit)
+    db.add(new_user)
+    db.commit()
+    # Обновляем объект new_user, чтобы получить сгенерированный базой данных id и другие актуальные поля
+    db.refresh(new_user)
+
+    # Отправляем письмо с подтверждением email в фоновом режиме.
+    # BackgroundTasks позволяют выполнить функцию асинхронно, не блокируя ответ на запрос регистрации.
+    background_tasks.add_task(send_verification_email, new_user.email, verification_token)
+
+    # Создаем и возвращаем JWT токен для автоматического входа
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_user.email, "role": new_user.role},
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # Эндпоинт для авторизации (получения JWT токена). Не требует авторизации, но проверяет учетные данные.
 # Используем стандартную форму OAuth2 Password Request Form (email/password).
-@app.post(
-    "/token", response_model=Token
-)  # response_model=Token указывает, что в ответ ожидается Pydantic модель Token
+@app.post("/token", response_model=Token) # response_model=Token указывает, что в ответ ожидается Pydantic модель Token
 async def login_for_access_token(
-    form_data: Annotated[
-        OAuth2PasswordRequestForm, Depends()
-    ],  # Зависимость для получения стандартной формы email/password
-    db: DbDependency,  # Зависимость для получения сессии БД
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], # Зависимость для получения стандартной формы email/password
+    db: DbDependency # Зависимость для получения сессии БД
 ):
     """
     Аутентификация пользователя и получение JWT токена доступа.
     Используется стандартный OAuth2 формат для username/password (где username - это email).
     """
     try:
-        # Rate limiting отключен, проверку check_login_attempts не выполняем
-        
         # Проверяем, существует ли пользователь 
         db_user = db.query(User).filter(User.email == form_data.username).first()
         
         # Если пользователь не найден, возвращаем общую ошибку аутентификации
         if not db_user:
-            # Не увеличиваем счетчик неудачных попыток
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Неверный логин или пароль. Пожалуйста, проверьте введенные данные.",
+                detail="Invalid credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        
-        # Если пользователь найден, проверяем пароль
-        # Если пользователь зарегистрирован через Google и у него нет пароля
-        if db_user.auth_provider == "google" and not db_user.hashed_password:
+
+        # Проверяем, не пытается ли пользователь Google войти с паролем
+        if db_user.auth_provider == "google":
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Этот аккаунт использует Google для входа. Пожалуйста, войдите через Google.",
-                headers={"WWW-Authenticate": "Bearer"},
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This account was registered with Google. Please use Google login instead."
             )
         
-        # Проверяем пароль
         if not verify_password(form_data.password, db_user.hashed_password):
-            # Не увеличиваем счетчик неудачных попыток
+            # Неверный пароль
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Неверный логин или пароль. Пожалуйста, проверьте введенные данные.",
+                detail="Invalid credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Если email не подтвержден и это не Google аккаунт
-        if not db_user.is_active and db_user.auth_provider != "google":
-            # Т.к. это не ошибка логина как таковая, не увеличиваем счетчик
+        # Проверяем активацию аккаунта
+        if not db_user.is_active:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Пожалуйста, подтвердите ваш email перед входом. Проверьте вашу почту.",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please verify your email address before logging in.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Создаем данные для включения в JWT токен
-        # sub - стандартный claim для хранения идентификатора пользователя в JWT
-        token_data = {"sub": db_user.email}
+        # Если все проверки пройдены успешно, создаем токен доступа
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": db_user.email, "id": db_user.id, "role": db_user.role},
+            expires_delta=access_token_expires
+        )
         
-        # Создаем JWT токен с ограниченным сроком действия
-        # Используем expires_delta из настроек (по умолчанию 30 минут)
-        access_token = create_access_token(data=token_data)
-        
-        # Не сбрасываем счетчик неудачных попыток - rate limiting отключен
-        
-        # Возвращаем созданный токен и его тип в соответствии со стандартом OAuth2
         return {"access_token": access_token, "token_type": "bearer"}
-    
     except Exception as e:
         # Логируем ошибку и возвращаем общую ошибку аутентификации
         print(f"Login error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Ошибка аутентификации",
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
 
-@app.get(
-    "/users/me", response_model=UserResponse
-)  # response_model=UserResponse для форматирования ответа
+    # Для дополнительной безопасности еще раз проверяем пароль
+    if not verify_password(form_data.password, user.hashed_password):
+        # Регистрируем неудачную попытку входа
+        LOGIN_ATTEMPTS.setdefault(form_data.username, []).append(time.time())
+        
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Если пользователь не активирован, возвращаем ошибку
+    if not user.is_active:
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Please verify your email address before logging in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Если аутентификация прошла успешно, создаем токен доступа (JWT)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Создаем payload для JWT токена с id пользователя (sub - subject в терминологии JWT) и ролью
+    access_token = create_access_token(
+        data={"sub": user.email, "id": user.id, "role": user.role},
+        expires_delta=access_token_expires
+    )
+
+    # Очищаем запись о попытках входа
+    if form_data.username in LOGIN_ATTEMPTS:
+        LOGIN_ATTEMPTS[form_data.username] = []
+
+    # Возвращаем токен доступа в соответствии с моделью Token, определенной в schemas.py
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+# Эндпоинт для получения информации о текущем авторизованном пользователе. Требует авторизацию.
+@app.get("/users/me", response_model=UserResponse) # response_model=UserResponse для форматирования ответа
 # Используем зависимость CurrentUser, которая сама использует get_current_user для проверки токена.
 def read_users_me(current_user: CurrentUser):
     """
@@ -521,9 +393,7 @@ def read_users_me(current_user: CurrentUser):
 # --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПОДТВЕРЖДЕНИЯ EMAIL ---
 # Доступен по ссылке из письма, не требует авторизации.
 @app.get("/verify-email", response_model=Token)
-def verify_email(
-    token: str, db: DbDependency
-):  # Принимает токен как параметр запроса (?token=...)
+def verify_email(token: str, db: DbDependency): # Принимает токен как параметр запроса (?token=...)
     """
     Подтверждение email по токену из письма.
     Активирует пользователя, если токен валиден и не просрочен.
@@ -539,23 +409,22 @@ def verify_email(
     if user is None:
         # Проверяем, возможно пользователь уже подтвердил email (токен был использован)
         # Ищем пользователей с is_active=True и отсутствующим токеном
-        active_users = (
-            db.query(User)
-            .filter(User.is_active == True, User.email_verification_token.is_(None))
-            .all()
-        )
-
+        active_users = db.query(User).filter(
+            User.is_active == True,
+            User.email_verification_token.is_(None)
+        ).all()
+        
         # Если есть активные пользователи, возможно один из них использовал данный токен
         if active_users:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid verification token. Email may have already been verified.",
+                detail="Invalid verification token. Email may have already been verified."
             )
         else:
             # Если токен не найден в базе данных и нет активных пользователей, он недействителен.
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,  # 400 Bad Request - некорректный запрос/токен
-                detail="Invalid verification token",
+                status_code=status.HTTP_400_BAD_REQUEST, # 400 Bad Request - некорректный запрос/токен
+                detail="Invalid verification token"
             )
 
     # Проверяем, не истек ли срок действия токена.
@@ -564,8 +433,8 @@ def verify_email(
     if token_lifetime > timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS):
         # Если разница во времени превышает установленный срок жизни токена.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,  # 400 Bad Request - просроченный токен
-            detail="Verification token expired",
+            status_code=status.HTTP_400_BAD_REQUEST, # 400 Bad Request - просроченный токен
+            detail="Verification token expired"
         )
 
     # Если токен найден, не просрочен и связан с существующим пользователем, активируем пользователя.
@@ -576,41 +445,34 @@ def verify_email(
 
     # Сохраняем изменения в базе данных
     db.commit()
-    db.refresh(
-        user
-    )  # Обновляем объект пользователя, чтобы убедиться, что изменения сохранены
+    db.refresh(user) # Обновляем объект пользователя, чтобы убедиться, что изменения сохранены
 
     # Создаем и возвращаем JWT токен для автоматического входа
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "role": user.role}, expires_delta=access_token_expires
+        data={"sub": user.email, "role": user.role},
+        expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+# --- Роуты для профилей ---
+
 # Эндпоинт для создания или обновления профиля Пациента. Требует авторизацию и роли 'patient'.
-@app.post(
-    "/patients/profiles",
-    response_model=PatientProfileResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@app.post("/patients/profiles", response_model=PatientProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_patient_profile(
-    profile_data: PatientProfileCreateUpdate,  # Данные профиля из запроса (Pydantic модель)
-    db: DbDependency,  # Зависимость для сессии БД
+    profile_data: PatientProfileCreateUpdate, # Данные профиля из запроса (Pydantic модель)
+    db: DbDependency, # Зависимость для сессии БД
     # Зависимость для получения текущего пользователя и проверки его роли.
     # Только пользователь с ролью 'patient' сможет успешно пройти эту зависимость.
-    current_user: Annotated[User, Depends(require_role("patient"))],
+    current_user: Annotated[User, Depends(require_role("patient"))]
 ):
     """
     Создать или обновить профиль Пациента для текущего авторизованного пользователя.
     Доступно только для пользователей с ролью 'patient'.
     """
     # Проверяем, существует ли профиль пациента для текущего пользователя (по user_id, связанному с current_user.id)
-    db_profile = (
-        db.query(PatientProfile)
-        .filter(PatientProfile.user_id == current_user.id)
-        .first()
-    )
+    db_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
 
     if db_profile:
         # Если профиль уже есть, обновляем его поля на основе данных из запроса.
@@ -619,54 +481,45 @@ def create_patient_profile(
         for key, value in profile_data.model_dump(exclude_unset=True).items():
             # Обновляем атрибуты объекта SQLAlchemy db_profile
             setattr(db_profile, key, value)
-        db.commit()  # Сохраняем изменения в БД
-        db.refresh(db_profile)  # Обновляем объект из БД
-        return db_profile  # Возвращаем обновленный профиль
+        db.commit() # Сохраняем изменения в БД
+        db.refresh(db_profile) # Обновляем объект из БД
+        return db_profile # Возвращаем обновленный профиль
     else:
         # Если профиля нет, создаем новый объект PatientProfile
         new_profile = PatientProfile(
-            user_id=current_user.id,  # Связываем профиль с текущим пользователем
-            **profile_data.model_dump(),  # Распаковываем данные из Pydantic модели PatientProfileCreateUpdate в аргументы конструктора PatientProfile
+            user_id=current_user.id, # Связываем профиль с текущим пользователем
+            **profile_data.model_dump() # Распаковываем данные из Pydantic модели PatientProfileCreateUpdate в аргументы конструктора PatientProfile
         )
-        db.add(new_profile)  # Добавляем новый профиль в сессию
-        db.commit()  # Сохраняем в БД
-        db.refresh(new_profile)  # Обновляем объект
-        return new_profile  # Возвращаем созданный профиль
+        db.add(new_profile) # Добавляем новый профиль в сессию
+        db.commit() # Сохраняем в БД
+        db.refresh(new_profile) # Обновляем объект
+        return new_profile # Возвращаем созданный профиль
 
 
 # Эндпоинт для создания или обновления профиля Врача. Требует авторизацию и роли 'doctor'.
-@app.post(
-    "/doctors/profiles",
-    response_model=DoctorProfileResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@app.post("/doctors/profiles", response_model=DoctorProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_doctor_profile(
-    profile_data: DoctorProfileCreateUpdate,  # Данные профиля из запроса
-    db: DbDependency,  # Сессия БД
-    current_user: Annotated[
-        User, Depends(require_role("doctor"))
-    ],  # Требуем роль 'doctor'
+    profile_data: DoctorProfileCreateUpdate, # Данные профиля из запроса
+    db: DbDependency, # Сессия БД
+    current_user: Annotated[User, Depends(require_role("doctor"))] # Требуем роль 'doctor'
 ):
     """
     Создать или обновить профиль Врача для текущего авторизованного пользователя.
     Доступно только для пользователей с ролью 'doctor'.
     """
     # Проверяем, существует ли профиль врача для текущего пользователя
-    db_profile = (
-        db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
-    )
+    db_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
 
     if db_profile:
         # Если профиль уже есть, обновляем его
         for key, value in profile_data.model_dump(exclude_unset=True).items():
             # Если врач пытается изменить статус is_active, проверяем, что врач верифицирован
-            if key == "is_active" and value is not None:
+            if key == 'is_active' and value is not None:
                 # Если врач не верифицирован, он не может активировать свой профиль
                 if not db_profile.is_verified and value == True:
                     raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Активировать профиль может только верифицированный врач",
-                    )
+                        status_code=status.HTTP_403_FORBIDDEN, 
+                        detail="Активировать профиль может только верифицированный врач")
                 # Обновляем is_active только для верифицированных врачей или при деактивации
                 if db_profile.is_verified or value == False:
                     setattr(db_profile, key, value)
@@ -680,9 +533,9 @@ def create_doctor_profile(
         # Если профиля нет, создаем новый
         # Не позволяем создавать профиль со статусом is_active=True, пока не верифицирован
         new_profile_data = profile_data.model_dump()
-        if "is_active" in new_profile_data and new_profile_data["is_active"] == True:
-            new_profile_data["is_active"] = False  # По умолчанию профиль неактивен
-
+        if 'is_active' in new_profile_data and new_profile_data['is_active'] == True:
+            new_profile_data['is_active'] = False  # По умолчанию профиль неактивен
+        
         new_profile = DoctorProfile(user_id=current_user.id, **new_profile_data)
         db.add(new_profile)
         db.commit()
@@ -692,58 +545,35 @@ def create_doctor_profile(
 
 # Эндпоинт для получения профиля текущего авторизованного пользователя (Пациента или Врача). Требует авторизацию.
 # response_model=Annotated[PatientProfileResponse | DoctorProfileResponse, ...] указывает, что эндпоинт может вернуть одну из двух Pydantic моделей.
-@app.get(
-    "/users/me/profile",
-    response_model=Annotated[PatientProfileResponse | DoctorProfileResponse, ...],
-)
-def read_my_profile(
-    db: DbDependency, current_user: CurrentUser
-):  # Требует просто авторизации
+@app.get("/users/me/profile", response_model=Annotated[PatientProfileResponse | DoctorProfileResponse, ...])
+def read_my_profile(db: DbDependency, current_user: CurrentUser): # Требует просто авторизации
     """
     Получить профиль текущего авторизованного пользователя (Пациента или Врача).
     Доступно для всех авторизованных пользователей с ролью 'patient' или 'doctor'.
     """
     # Проверяем роль текущего пользователя и ищем соответствующий профиль.
     if current_user.role == "patient":
-        profile = (
-            db.query(PatientProfile)
-            .filter(PatientProfile.user_id == current_user.id)
-            .first()
-        )
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
         if profile is None:
             # Если профиль пациента не найден (хотя пользователь есть и роль 'patient')
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Patient profile not found",
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient profile not found")
         # Возвращаем объект SQLAlchemy профиля пациента. FastAPI/Pydantic преобразует его в PatientProfileResponse.
         return profile
     elif current_user.role == "doctor":
-        profile = (
-            db.query(DoctorProfile)
-            .filter(DoctorProfile.user_id == current_user.id)
-            .first()
-        )
+        profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
         if profile is None:
             # Если профиль врача не найден
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Doctor profile not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor profile not found")
         # Возвращаем объект SQLAlchemy профиля врача. FastAPI/Pydantic преобразует его в DoctorProfileResponse.
         return profile
     else:
         # Если у пользователя роль, для которой профиль не предусмотрен (например, 'admin')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User role does not have a profile type",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User role does not have a profile type")
 
 
 # Эндпоинт для получения публичного профиля Врача по ID пользователя Врача. Пока не требует авторизации.
 @app.get("/doctors/{user_id}/profile", response_model=DoctorProfileResponse)
-def read_doctor_profile_by_user_id(
-    user_id: int, db: DbDependency
-):  # Не требует авторизации (пока)
+def read_doctor_profile_by_user_id(user_id: int, db: DbDependency): # Не требует авторизации (пока)
     """
     Получить публичный профиль Врача по ID пользователя Врача.
     Доступно без авторизации (пока).
@@ -752,26 +582,18 @@ def read_doctor_profile_by_user_id(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         # Если пользователь не найден
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Проверяем, что найденный пользователь является Врачом.
     if user.role != "doctor":
         # Если пользователь не врач, возвращаем 404 (или 400, в зависимости от того, хотим ли мы скрывать существование пользователя)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User is not a doctor or their profile is not public",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User is not a doctor or their profile is not public")
 
     # Ищем профиль Врача, связанный с этим пользователем.
     profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
     if profile is None:
         # Если профиль врача не найден (хотя пользователь есть и роль 'doctor')
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Doctor profile not found for this user",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor profile not found for this user")
 
     # Возвращаем объект SQLAlchemy профиля врача. FastAPI/Pydantic преобразует его в DoctorProfileResponse.
     return profile
@@ -779,22 +601,17 @@ def read_doctor_profile_by_user_id(
 
 # --- Эндпоинты для поиска врачей ---
 
-
 # Получение списка всех врачей с опциональной фильтрацией
 @app.get("/api/doctors", response_model=DoctorListResponse, tags=["doctors"])
 async def get_doctors(
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(
-        get_current_user
-    ),  # Опционально, может быть None для публичного доступа
+    current_user: Optional[User] = Depends(get_current_user),  # Опционально, может быть None для публичного доступа
     specialization: Optional[str] = Query(None, description="Фильтр по специализации"),
-    district: Optional[str] = Query(
-        None, description="Фильтр по району практики врача"
-    ),
+    district: Optional[str] = Query(None, description="Фильтр по району практики врача"),
     min_price: Optional[int] = Query(None, description="Минимальная стоимость"),
     max_price: Optional[int] = Query(None, description="Максимальная стоимость"),
     page: int = Query(1, description="Номер страницы (начиная с 1)"),
-    size: int = Query(10, description="Размер страницы (количество элементов)"),
+    size: int = Query(10, description="Размер страницы (количество элементов)")
 ):
     """
     Получение списка всех врачей с возможностью фильтрации по специализации, району практики и диапазону цен.
@@ -802,58 +619,54 @@ async def get_doctors(
     """
     # Создаем базовый запрос на получение всех активных и верифицированных врачей
     query = db.query(DoctorProfile).filter(
-        DoctorProfile.is_active == True, DoctorProfile.is_verified == True
+        DoctorProfile.is_active == True,
+        DoctorProfile.is_verified == True
     )
-
+    
     # Применяем фильтры только если они явно указаны
     if specialization:
         # Используем точное совпадение специализации
         query = query.filter(DoctorProfile.specialization == specialization)
-
+        
     if district:
         # Используем точное совпадение района
         query = query.filter(DoctorProfile.district == district)
     # Если пользователь авторизован как пациент и у него указан район, фильтруем по району
-    elif current_user and current_user.role == "patient":
-        patient_profile = (
-            db.query(PatientProfile)
-            .filter(PatientProfile.user_id == current_user.id)
-            .first()
-        )
+    elif current_user and current_user.role == 'patient':
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
         if patient_profile and patient_profile.district:
             query = query.filter(DoctorProfile.district == patient_profile.district)
-
+        
     if min_price is not None:
         query = query.filter(DoctorProfile.cost_per_consultation >= min_price)
-
+        
     if max_price is not None:
         query = query.filter(DoctorProfile.cost_per_consultation <= max_price)
-
+    
     # Считаем общее количество записей после применения фильтров
     total = query.count()
-
+    
     # Добавляем пагинацию
     pages = ceil(total / size) if total > 0 else 0
-
+    
     # Проверка корректности номера страницы
     if page < 1:
         page = 1
     elif page > pages and pages > 0:
         page = pages
-
+    
     # Применяем пагинацию
     offset = (page - 1) * size
     doctors = query.offset(offset).limit(size).all()
-
+    
     # Формируем ответ
     return {
         "items": doctors,
         "total": total,
         "page": page,
         "size": size,
-        "pages": pages,
+        "pages": pages
     }
-
 
 # Модель для расширенной информации о враче
 class DoctorDetailResponse(BaseModel):
@@ -870,71 +683,60 @@ class DoctorDetailResponse(BaseModel):
     is_active: bool
     rating: float = 0.0
     reviews_count: int = 0
-
+    
     class Config:
         from_attributes = True
 
-
 # Получение детальной информации о враче по ID
-@app.get(
-    "/api/doctors/{doctor_id}", response_model=DoctorDetailResponse, tags=["doctors"]
-)
+@app.get("/api/doctors/{doctor_id}", response_model=DoctorDetailResponse, tags=["doctors"])
 async def get_doctor_by_id(
     doctor_id: int,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(
-        get_current_user
-    ),  # Опционально для публичного доступа
+    current_user: Optional[User] = Depends(get_current_user)  # Опционально для публичного доступа
 ):
     """
     Получение детальной информации о враче по ID.
     Доступно как для авторизованных, так и для неавторизованных пользователей.
     """
     doctor = db.query(DoctorProfile).filter(DoctorProfile.id == doctor_id).first()
-
+    
     if not doctor:
         raise HTTPException(status_code=404, detail="Врач не найден")
-
+    
     # Подготавливаем ответ
     doctor_detail = DoctorDetailResponse.model_validate(doctor)
-
+    
     # Получаем средний рейтинг и количество отзывов
     # Сначала получаем все завершенные консультации этого врача
-    consultation_ids = (
-        db.query(Consultation.id)
-        .filter(
-            Consultation.doctor_id == doctor.user_id, Consultation.status == "completed"
-        )
-        .subquery()
-    )
-
+    consultation_ids = db.query(Consultation.id).filter(
+        Consultation.doctor_id == doctor.user_id,
+        Consultation.status == "completed"
+    ).subquery()
+    
     # Затем получаем отзывы для этих консультаций
-    reviews = (
-        db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
-    )
-
+    reviews = db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
+    
     # Рассчитываем средний рейтинг и количество отзывов
     if reviews:
         total_rating = sum(review.rating for review in reviews)
         doctor_detail.reviews_count = len(reviews)
-        doctor_detail.rating = round(
-            total_rating / len(reviews), 1
-        )  # Округляем до 1 десятичной цифры
-
+        doctor_detail.rating = round(total_rating / len(reviews), 1)  # Округляем до 1 десятичной цифры
+    
     return doctor_detail
 
 
 # --- TODO: Добавить дополнительные эндпоинты (консультации, отзывы, платежи) ---
 
-
 # Модель для Google OAuth запроса
 class GoogleAuthRequest(BaseModel):
     code: str
 
-
 # Добавляем новый маршрут для Google OAuth авторизации
 @app.post("/auth/google", response_model=Token)
-async def google_auth(data: GoogleAuthRequest, db: DbDependency):
+async def google_auth(
+    data: GoogleAuthRequest,
+    db: DbDependency
+):
     """
     Обработка авторизации через Google OAuth.
     Принимает код авторизации от Google, получает данные пользователя,
@@ -954,17 +756,17 @@ async def google_auth(data: GoogleAuthRequest, db: DbDependency):
                 )
             # Пробрасываем исходное исключение, если это не invalid_grant
             raise
-
+        
         # Аутентифицируем или создаем пользователя на основе данных Google
         user = await authenticate_google_user(google_data, db)
-
+        
         # Создаем JWT токен для пользователя
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.email, "role": user.role},
-            expires_delta=access_token_expires,
+            expires_delta=access_token_expires
         )
-
+        
         # Возвращаем токен
         return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
@@ -985,12 +787,11 @@ class UserProfileData(BaseModel):
 
 
 # Эндпоинт для создания/обновления профиля пользователя после Google авторизации
-@app.post(
-    "/users/me/google-profile",
-    response_model=Union[PatientProfileResponse, DoctorProfileResponse],
-)
+@app.post("/users/me/google-profile", response_model=Union[PatientProfileResponse, DoctorProfileResponse])
 async def create_update_google_profile(
-    profile_data: UserProfileData, db: DbDependency, current_user: CurrentUser
+    profile_data: UserProfileData,
+    db: DbDependency,
+    current_user: CurrentUser
 ):
     """
     Создает или обновляет профиль пользователя после авторизации через Google.
@@ -998,19 +799,15 @@ async def create_update_google_profile(
     # Проверяем, существует ли у пользователя профиль
     if profile_data.role == "patient":
         # Проверяем, существует ли профиль пациента
-        profile = (
-            db.query(PatientProfile)
-            .filter(PatientProfile.user_id == current_user.id)
-            .first()
-        )
-
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
+        
         if not profile:
             # Создаем новый профиль пациента
             profile = PatientProfile(
                 user_id=current_user.id,
                 full_name=profile_data.full_name,
                 contact_phone=profile_data.contact_phone,
-                contact_address=profile_data.contact_address,
+                contact_address=profile_data.contact_address
             )
             db.add(profile)
         else:
@@ -1020,23 +817,19 @@ async def create_update_google_profile(
                 profile.contact_phone = profile_data.contact_phone
             if profile_data.contact_address:
                 profile.contact_address = profile_data.contact_address
-
+        
         # Если роль пользователя отличается от указанной, обновляем её
         if current_user.role != "patient":
             current_user.role = "patient"
-
+        
         db.commit()
         db.refresh(profile)
         return profile
-
+        
     elif profile_data.role == "doctor":
         # Проверяем, существует ли профиль врача
-        profile = (
-            db.query(DoctorProfile)
-            .filter(DoctorProfile.user_id == current_user.id)
-            .first()
-        )
-
+        profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
+        
         # Данные для профиля врача нужно будет запросить дополнительно
         # Здесь мы создаем только базовый профиль
         if not profile:
@@ -1047,7 +840,7 @@ async def create_update_google_profile(
                 experience="",
                 education="",
                 cost_per_consultation=1000,  # Дефолтное значение
-                practice_areas=profile_data.district if profile_data.district else "",
+                practice_areas=profile_data.district if profile_data.district else ""
             )
             db.add(profile)
         else:
@@ -1055,19 +848,19 @@ async def create_update_google_profile(
             profile.full_name = profile_data.full_name
             if profile_data.district:
                 profile.practice_areas = profile_data.district
-
+        
         # Если роль пользователя отличается от указанной, обновляем её
         if current_user.role != "doctor":
             current_user.role = "doctor"
-
+            
         db.commit()
         db.refresh(profile)
         return profile
-
+    
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role specified. Must be 'patient' or 'doctor'.",
+            detail="Invalid role specified. Must be 'patient' or 'doctor'."
         )
 
 
@@ -1086,10 +879,9 @@ async def get_districts():
         "Шайхантаурский район",
         "Юнусабадский район",
         "Яккасарайский район",
-        "Яшнабадский район",
+        "Яшнабадский район"
     ]
     return districts
-
 
 @app.get("/api/specializations", response_model=List[str])
 async def get_specializations():
@@ -1109,20 +901,14 @@ async def get_specializations():
         "Психиатр",
         "Онколог",
         "Отоларинголог (ЛОР)",
-        "Ортопед",
+        "Ортопед"
     ]
     return specializations
 
-
 # --- Роуты для заявок на роль врача ---
 
-
 # Эндпоинт для подачи заявки на роль врача
-@app.post(
-    "/doctor-applications",
-    response_model=DoctorApplicationResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@app.post("/doctor-applications", response_model=DoctorApplicationResponse, status_code=status.HTTP_201_CREATED)
 async def create_doctor_application(
     full_name: str = Form(...),
     specialization: str = Form(...),
@@ -1134,11 +920,11 @@ async def create_doctor_application(
     diploma: Optional[UploadFile] = File(None),
     license_doc: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Создает новую заявку на получение роли врача.
-
+    
     Args:
         form_data: Данные формы заявки
         photo: Фото врача
@@ -1146,32 +932,29 @@ async def create_doctor_application(
         license_doc: Скан лицензии
         db: Сессия базы данных
         current_user: Текущий пользователь
-
+        
     Returns:
         DoctorApplicationResponse: Данные созданной заявки
     """
     # Проверяем, что пользователь не является уже врачом
     if current_user.role == "doctor":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="У вас уже есть роль врача"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У вас уже есть роль врача"
         )
-
+    
     # Проверяем, нет ли уже ожидающей заявки от этого пользователя
-    existing_application = (
-        db.query(DoctorApplication)
-        .filter(
-            DoctorApplication.user_id == current_user.id,
-            DoctorApplication.status == "pending",
-        )
-        .first()
-    )
-
+    existing_application = db.query(DoctorApplication).filter(
+        DoctorApplication.user_id == current_user.id,
+        DoctorApplication.status == "pending"
+    ).first()
+    
     if existing_application:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="У вас уже есть ожидающая рассмотрения заявка",
+            detail="У вас уже есть ожидающая рассмотрения заявка"
         )
-
+    
     # Создаем новую заявку
     new_application = DoctorApplication(
         user_id=current_user.id,
@@ -1180,71 +963,67 @@ async def create_doctor_application(
         experience=experience,
         education=education,
         license_number=license_number,
-        additional_info=additional_info,
+        additional_info=additional_info
     )
-
+    
     # Обрабатываем загруженные файлы
     if photo:
         file_extension = os.path.splitext(photo.filename)[1]
         filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(PHOTO_DIR, filename)
-
+        
         # Сохраняем файл
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(photo.file, buffer)
-
+        
         new_application.photo_path = f"/uploads/photos/{filename}"
-
+    
     if diploma:
         file_extension = os.path.splitext(diploma.filename)[1]
         filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(DIPLOMA_DIR, filename)
-
+        
         # Сохраняем файл
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(diploma.file, buffer)
-
+        
         new_application.diploma_path = f"/uploads/diplomas/{filename}"
-
+    
     if license_doc:
         file_extension = os.path.splitext(license_doc.filename)[1]
         filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(LICENSE_DIR, filename)
-
+        
         # Сохраняем файл
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(license_doc.file, buffer)
-
+        
         new_application.license_path = f"/uploads/licenses/{filename}"
-
+    
     # Сохраняем заявку в базе данных
     db.add(new_application)
     db.commit()
     db.refresh(new_application)
-
+    
     return new_application
 
 
 # Эндпоинт для получения заявок на роль врача текущего пользователя
-@app.get(
-    "/users/me/doctor-applications", response_model=List[DoctorApplicationResponse]
-)
+@app.get("/users/me/doctor-applications", response_model=List[DoctorApplicationResponse])
 async def get_my_doctor_applications(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     # Параметр запроса для указания, нужно ли включать просмотренные заявки
-    include_viewed: bool = Query(
-        False, description="Включать уже просмотренные заявки"
-    ),
+    include_viewed: bool = Query(False, description="Включать уже просмотренные заявки")
 ):
     """
     Получает список заявок на роль врача текущего пользователя.
-
+    
     Args:
         db: Сессия базы данных
         current_user: Текущий пользователь
         include_viewed: Флаг, указывающий, нужно ли включать уже просмотренные заявки
-
+        
     Returns:
         List[DoctorApplicationResponse]: Список заявок
     """
@@ -1252,25 +1031,21 @@ async def get_my_doctor_applications(
     applications_query = db.query(DoctorApplication).filter(
         DoctorApplication.user_id == current_user.id
     )
-
+    
     if not include_viewed:
         # Подзапрос для получения ID просмотренных заявок
-        viewed_app_ids = (
-            db.query(ViewedNotification.application_id)
-            .filter(ViewedNotification.user_id == current_user.id)
-            .subquery()
-        )
-
+        viewed_app_ids = db.query(ViewedNotification.application_id).filter(
+            ViewedNotification.user_id == current_user.id
+        ).subquery()
+        
         # Исключаем просмотренные заявки
         applications_query = applications_query.filter(
             ~DoctorApplication.id.in_(viewed_app_ids)
         )
-
+    
     # Получаем заявки, отсортированные по дате создания
-    applications = applications_query.order_by(
-        DoctorApplication.created_at.desc()
-    ).all()
-
+    applications = applications_query.order_by(DoctorApplication.created_at.desc()).all()
+    
     return applications
 
 
@@ -1279,124 +1054,106 @@ async def get_my_doctor_applications(
 async def get_all_doctor_applications(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
-    status: Optional[str] = Query(
-        None, description="Фильтр по статусу заявки: pending, approved, rejected"
-    ),
+    status: Optional[str] = Query(None, description="Фильтр по статусу заявки: pending, approved, rejected"),
     page: int = Query(1, description="Номер страницы", ge=1),
-    size: int = Query(10, description="Размер страницы", ge=1, le=100),
+    size: int = Query(10, description="Размер страницы", ge=1, le=100)
 ):
     """
     Получает список всех заявок на роль врача (для администраторов).
-
+    
     Args:
         status: Фильтр по статусу заявки
         page: Номер страницы для пагинации
         size: Размер страницы для пагинации
         db: Сессия базы данных
         current_user: Текущий пользователь (администратор)
-
+        
     Returns:
         DoctorApplicationListResponse: Список заявок с пагинацией
     """
     # Создаем базовый запрос
     query = db.query(DoctorApplication)
-
+    
     # Применяем фильтры, если они указаны
     if status:
         query = query.filter(DoctorApplication.status == status)
-
+    
     # Получаем общее количество заявок
     total = query.count()
-
+    
     # Вычисляем общее количество страниц
     pages = ceil(total / size) if total > 0 else 1
-
+    
     # Применяем пагинацию
     query = query.order_by(DoctorApplication.created_at.desc())
     query = query.offset((page - 1) * size).limit(size)
-
+    
     # Получаем заявки
     applications = query.all()
-
+    
     # Формируем ответ
     return {
         "items": applications,
         "total": total,
         "page": page,
         "size": size,
-        "pages": pages,
+        "pages": pages
     }
 
 
 # Эндпоинт для обработки заявки администратором
-@app.put(
-    "/admin/doctor-applications/{application_id}",
-    response_model=DoctorApplicationResponse,
-)
+@app.put("/admin/doctor-applications/{application_id}", response_model=DoctorApplicationResponse)
 async def process_doctor_application(
     application_id: int,
     application_data: DoctorApplicationProcessRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin"))
 ):
     """
     Обрабатывает заявку на роль врача (одобрение или отклонение).
-
+    
     Args:
         application_id: ID заявки
         application_data: Данные обработки заявки
         db: Сессия базы данных
         current_user: Текущий пользователь (администратор)
-
+        
     Returns:
         DoctorApplicationResponse: Обновленные данные заявки
     """
     # Получаем заявку
-    application = (
-        db.query(DoctorApplication)
-        .filter(DoctorApplication.id == application_id)
-        .first()
-    )
-
+    application = db.query(DoctorApplication).filter(DoctorApplication.id == application_id).first()
+    
     if not application:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Заявка не найдена"
         )
-
+    
     # Проверяем, не обработана ли уже заявка
     if application.status != "pending":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Заявка уже обработана со статусом {application.status}",
+            detail=f"Заявка уже обработана со статусом {application.status}"
         )
-
+    
     # Обновляем статус заявки
     application.status = application_data.status
     application.admin_comment = application_data.admin_comment
     application.processed_at = datetime.utcnow()
-
+    
     # Если заявка одобрена, обновляем роль пользователя на "doctor"
     if application_data.status == "approved":
         user = db.query(User).filter(User.id == application.user_id).first()
         if user:
             user.role = "doctor"
-
+            
             # Получаем профиль пациента, чтобы узнать район
-            patient_profile = (
-                db.query(PatientProfile)
-                .filter(PatientProfile.user_id == user.id)
-                .first()
-            )
-            district = (
-                patient_profile.district
-                if patient_profile and patient_profile.district
-                else "Яшнабадский район"
-            )  # Дефолт, если не указан
-
+            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+            district = patient_profile.district if patient_profile and patient_profile.district else "Яшнабадский район"  # Дефолт, если не указан
+            
             # Создаем профиль врача, если его еще нет
-            doctor_profile = (
-                db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
-            )
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
             if not doctor_profile:
                 doctor_profile = DoctorProfile(
                     user_id=user.id,
@@ -1408,7 +1165,7 @@ async def process_doctor_application(
                     practice_areas=district,
                     district=district,  # Явно устанавливаем район
                     is_verified=True,
-                    is_active=True,  # Автоматически активируем профиль
+                    is_active=True  # Автоматически активируем профиль
                 )
                 db.add(doctor_profile)
             else:
@@ -1428,24 +1185,25 @@ async def process_doctor_application(
             # Если у пользователя роль "doctor", меняем на "patient"
             if user.role == "doctor":
                 user.role = "patient"
-
+                
             # Деактивируем профиль врача, если он существует
-            doctor_profile = (
-                db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
-            )
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
             if doctor_profile:
                 doctor_profile.is_active = False
                 doctor_profile.is_verified = False
-
+    
     db.commit()
     db.refresh(application)
-
+    
     return application
-
 
 # Эндпоинт для создания админа с заданным логином и паролем
 @app.post("/setup_admin_m5kL9sP2q7", status_code=status.HTTP_201_CREATED)
-async def create_admin_user(email: str, password: str, db: Session = Depends(get_db)):
+async def create_admin_user(
+    email: str,
+    password: str,
+    db: Session = Depends(get_db)
+):
     """
     Создает нового администратора с указанными email и паролем.
     Этот эндпоинт должен использоваться только при начальной настройке системы.
@@ -1456,29 +1214,31 @@ async def create_admin_user(email: str, password: str, db: Session = Depends(get
     if ENV != "development":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Этот эндпоинт доступен только в режиме разработки",
+            detail="Этот эндпоинт доступен только в режиме разработки"
         )
-
+    
     # Проверяем, есть ли уже пользователь с таким email
     existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Пользователь с email {email} уже существует",
+            detail=f"Пользователь с email {email} уже существует"
         )
-
+    
     # Создаем нового админа
     hashed_password = get_password_hash(password)
     admin_user = User(
-        email=email, hashed_password=hashed_password, is_active=True, role="admin"
+        email=email,
+        hashed_password=hashed_password,
+        is_active=True,
+        role="admin"
     )
-
+    
     db.add(admin_user)
     db.commit()
     db.refresh(admin_user)
-
+    
     return {"message": f"Администратор {email} успешно создан"}
-
 
 # Эндпоинт для получения списка всех пользователей (для админов)
 @app.get("/admin/users", response_model=List[UserResponse])
@@ -1486,44 +1246,40 @@ async def get_all_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
     page: int = Query(1, description="Номер страницы", ge=1),
-    size: int = Query(10, description="Размер страницы", ge=1, le=100),
+    size: int = Query(10, description="Размер страницы", ge=1, le=100)
 ):
     """
     Получает список всех пользователей (для администраторов).
-
+    
     Args:
         page: Номер страницы для пагинации
         size: Размер страницы для пагинации
         db: Сессия базы данных
         current_user: Текущий пользователь (администратор)
-
+        
     Returns:
         List[UserResponse]: Список пользователей
     """
     # Получаем всех пользователей с пагинацией
     users = db.query(User).order_by(User.id).offset((page - 1) * size).limit(size).all()
-
+    
     return users
 
-
 # Эндпоинт для получения профиля пользователя по ID (для админов)
-@app.get(
-    "/admin/users/{user_id}/profile",
-    response_model=Union[PatientProfileResponse, DoctorProfileResponse, dict],
-)
+@app.get("/admin/users/{user_id}/profile", response_model=Union[PatientProfileResponse, DoctorProfileResponse, dict])
 async def get_user_profile_by_id(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin"))
 ):
     """
     Получает профиль любого пользователя по ID (для администраторов).
-
+    
     Args:
         user_id: ID пользователя
         db: Сессия базы данных
         current_user: Текущий пользователь (администратор)
-
+        
     Returns:
         Union[PatientProfileResponse, DoctorProfileResponse, dict]: Профиль пользователя
     """
@@ -1531,46 +1287,29 @@ async def get_user_profile_by_id(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден"
         )
-
+    
     # В зависимости от роли пользователя, получаем соответствующий профиль
     if user.role == "patient":
-        profile = (
-            db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
-        )
+        profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
         if not profile:
-            return {
-                "message": "Профиль пациента не найден",
-                "user_role": "patient",
-                "user_email": user.email,
-            }
+            return {"message": "Профиль пациента не найден", "user_role": "patient", "user_email": user.email}
         return profile
-
+    
     elif user.role == "doctor":
-        profile = (
-            db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
-        )
+        profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
         if not profile:
-            return {
-                "message": "Профиль врача не найден",
-                "user_role": "doctor",
-                "user_email": user.email,
-            }
+            return {"message": "Профиль врача не найден", "user_role": "doctor", "user_email": user.email}
         return profile
-
+    
     else:
-        return {
-            "message": "У данного пользователя нет профиля",
-            "user_role": user.role,
-            "user_email": user.email,
-        }
-
+        return {"message": "У данного пользователя нет профиля", "user_role": user.role, "user_email": user.email}
 
 # Модель для изменения роли пользователя
 class ChangeUserRoleRequest(BaseModel):
     role: str = Field(..., description="Новая роль пользователя")
-
 
 # Эндпоинт для изменения роли пользователя (для админов)
 @app.put("/admin/users/{user_id}/role", response_model=UserResponse)
@@ -1578,17 +1317,17 @@ async def change_user_role(
     user_id: int,
     role_data: ChangeUserRoleRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin"))
 ):
     """
     Изменяет роль пользователя (для администраторов).
-
+    
     Args:
         user_id: ID пользователя
         role_data: Данные с новой ролью
         db: Сессия базы данных
         current_user: Текущий пользователь (администратор)
-
+        
     Returns:
         UserResponse: Обновленные данные пользователя
     """
@@ -1596,57 +1335,46 @@ async def change_user_role(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден"
         )
-
+    
     # Проверяем, что роль допустима
     valid_roles = ["patient", "doctor", "admin"]
     if role_data.role not in valid_roles:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Недопустимая роль. Допустимые роли: {', '.join(valid_roles)}",
+            detail=f"Недопустимая роль. Допустимые роли: {', '.join(valid_roles)}"
         )
-
+    
     # Проверяем текущую роль пользователя
     old_role = user.role
-
+    
     # Изменяем роль пользователя
     user.role = role_data.role
-
+    
     # Обрабатываем изменение роли с doctor на другую
     if old_role == "doctor" and role_data.role != "doctor":
         # Деактивируем профиль врача, но не удаляем его
-        doctor_profile = (
-            db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
-        )
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
         if doctor_profile:
             doctor_profile.is_active = False
             doctor_profile.is_verified = False  # Также снимаем верификацию
-
+    
     # Обрабатываем изменение роли с другой на doctor
     if old_role != "doctor" and role_data.role == "doctor":
         # Проверяем, существует ли профиль врача
-        doctor_profile = (
-            db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
-        )
-
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == user.id).first()
+        
         # Получаем профиль пациента, чтобы узнать район
-        patient_profile = (
-            db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
-        )
-        district = (
-            patient_profile.district
-            if patient_profile and patient_profile.district
-            else "Яшнабадский район"
-        )  # Дефолт, если не указан
-
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+        district = patient_profile.district if patient_profile and patient_profile.district else "Яшнабадский район"  # Дефолт, если не указан
+        
         if doctor_profile:
             # Активируем профиль врача
             doctor_profile.is_active = True
-            doctor_profile.is_verified = (
-                True  # Автоматически верифицируем при назначении админом
-            )
-
+            doctor_profile.is_verified = True  # Автоматически верифицируем при назначении админом
+            
             # Обновляем район если он есть в профиле пациента
             if patient_profile and patient_profile.district:
                 doctor_profile.district = district
@@ -1654,7 +1382,7 @@ async def change_user_role(
         else:
             # Создаем профиль врача с районом из профиля пациента
             full_name = patient_profile.full_name if patient_profile else None
-
+            
             doctor_profile = DoctorProfile(
                 user_id=user.id,
                 full_name=full_name,
@@ -1663,151 +1391,115 @@ async def change_user_role(
                 is_active=True,
                 is_verified=True,  # Автоматически верифицируем при назначении админом
                 district=district,
-                practice_areas=district,
+                practice_areas=district
             )
             db.add(doctor_profile)
-
+    
     db.commit()
     db.refresh(user)
-
+    
     return user
-
 
 # --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПОВТОРНОЙ ОТПРАВКИ ПИСЬМА ПОДТВЕРЖДЕНИЯ ---
 @app.post("/resend-verification")
-def resend_verification_email(
-    email_data: dict, db: DbDependency, background_tasks: BackgroundTasks
-):
+def resend_verification_email(email_data: dict, db: DbDependency, background_tasks: BackgroundTasks):
     """
     Повторная отправка письма с подтверждением email.
     Генерирует новый токен и отправляет новое письмо с ссылкой активации.
-
+    
     Args:
         email_data (dict): Словарь с email пользователя.
         db (Session): Сессия базы данных.
         background_tasks (BackgroundTasks): Объект для выполнения задач в фоновом режиме.
-
+        
     Returns:
         dict: Сообщение об успешной отправке письма или ошибка.
     """
-    print(f"Received request for resend verification. Data: {email_data}")
+    email = email_data.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email не указан"
+        )
     
-    try:
-        email = email_data.get("email")
-        if not email:
-            print("Email not provided in request")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Email не указан"
-            )
-
-        # Ищем пользователя в базе данных
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            print(f"User with email {email} not found")
-            # Для безопасности не сообщаем, что пользователя не существует
-            return {
-                "message": "Если этот email зарегистрирован в системе, на него будет отправлено письмо с инструкциями."
-            }
-
-        # Если пользователь уже активирован, сообщаем об этом
-        if user.is_active:
-            print(f"User {email} is already active")
-            return {"message": "Ваш email уже подтвержден. Вы можете войти в систему."}
-
-        print(f"Generating new verification token for {email}")
-        
-        # Генерируем новый токен для подтверждения email
-        verification_token = secrets.token_urlsafe(32)
-        token_created_at = datetime.utcnow()
-
-        # Обновляем токен в базе данных
-        user.email_verification_token = verification_token
-        user.email_verification_token_created_at = token_created_at
-        db.commit()
-
-        print(f"Token updated in database for {email}")
-        
-        # Отправляем письмо с подтверждением email в фоновом режиме
-        background_tasks.add_task(send_verification_email, user.email, verification_token)
-        
-        print(f"Background task added to send verification email to {email}")
-
-        return {
-            "message": "Новое письмо с инструкциями для подтверждения email отправлено."
-        }
-    except Exception as e:
-        print(f"Error in resend_verification_email: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже."
-            )
-
+    # Ищем пользователя в базе данных
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Для безопасности не сообщаем, что пользователя не существует
+        return {"message": "Если этот email зарегистрирован в системе, на него будет отправлено письмо с инструкциями."}
+    
+    # Если пользователь уже активирован, сообщаем об этом
+    if user.is_active:
+        return {"message": "Ваш email уже подтвержден. Вы можете войти в систему."}
+    
+    # Генерируем новый токен для подтверждения email
+    verification_token = secrets.token_urlsafe(32)
+    token_created_at = datetime.utcnow()
+    
+    # Обновляем токен в базе данных
+    user.email_verification_token = verification_token
+    user.email_verification_token_created_at = token_created_at
+    db.commit()
+    
+    # Отправляем письмо с подтверждением email в фоновом режиме
+    background_tasks.add_task(send_verification_email, user.email, verification_token)
+    
+    return {"message": "Новое письмо с инструкциями для подтверждения email отправлено."}
 
 # Модель для запроса отметки уведомления как просмотренного
 class MarkNotificationRequest(BaseModel):
     application_id: int
 
-
 # Эндпоинт для отметки уведомления как просмотренного
 @app.post("/users/me/notifications/viewed", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_notification_viewed(
-    request: MarkNotificationRequest, db: DbDependency, current_user: CurrentUser
+    request: MarkNotificationRequest,
+    db: DbDependency,
+    current_user: CurrentUser
 ):
     """
     Отмечает уведомление о заявке как просмотренное пользователем.
-
+    
     Args:
         request: Данные запроса с ID заявки
         db: Сессия базы данных
         current_user: Текущий пользователь
-
+    
     Returns:
         204 No Content
     """
     # Проверяем, существует ли заявка
-    application = (
-        db.query(DoctorApplication)
-        .filter(DoctorApplication.id == request.application_id)
-        .first()
-    )
+    application = db.query(DoctorApplication).filter(DoctorApplication.id == request.application_id).first()
     if not application:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Заявка не найдена"
         )
-
+    
     # Проверяем, не была ли заявка уже отмечена как просмотренная
-    existing_notification = (
-        db.query(ViewedNotification)
-        .filter(
-            ViewedNotification.user_id == current_user.id,
-            ViewedNotification.application_id == request.application_id,
-        )
-        .first()
-    )
-
+    existing_notification = db.query(ViewedNotification).filter(
+        ViewedNotification.user_id == current_user.id,
+        ViewedNotification.application_id == request.application_id
+    ).first()
+    
     if not existing_notification:
         # Если нет, создаем новую запись
         viewed_notification = ViewedNotification(
-            user_id=current_user.id, application_id=request.application_id
+            user_id=current_user.id,
+            application_id=request.application_id
         )
         db.add(viewed_notification)
         db.commit()
-
+    
     # Возвращаем 204 No Content (успешно, но без тела ответа)
     return None
 
-
 # --- Модели для консультаций и сообщений ---
-
 
 # Модель для создания консультации
 class ConsultationCreate(BaseModel):
     doctor_id: int
-
-
+    
 # Модель для ответа по консультации
 class ConsultationResponse(BaseModel):
     id: int
@@ -1818,16 +1510,14 @@ class ConsultationResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     chat_time_limit: int
-
+    
     class Config:
         from_attributes = True
-
 
 # Модель для создания сообщения
 class MessageCreate(BaseModel):
     content: str
-
-
+    
 # Модель для ответа по сообщению
 class MessageResponse(BaseModel):
     id: int
@@ -1836,17 +1526,15 @@ class MessageResponse(BaseModel):
     content: str
     sent_at: datetime
     is_read: bool
-
+    
     class Config:
         from_attributes = True
-
-
+        
 # Модель для создания отзыва
 class ReviewCreate(BaseModel):
     rating: int = Field(..., ge=1, le=5)
     comment: Optional[str] = None
-
-
+    
 # Модель для ответа по отзыву
 class ReviewResponse(BaseModel):
     id: int
@@ -1854,255 +1542,180 @@ class ReviewResponse(BaseModel):
     rating: int
     comment: Optional[str] = None
     created_at: datetime
-
+    
     class Config:
         from_attributes = True
 
-
 # --- Роуты для консультаций ---
 
-
 # Эндпоинт для создания новой консультации
-@app.post(
-    "/api/consultations", response_model=ConsultationResponse, tags=["consultations"]
-)
+@app.post("/api/consultations", response_model=ConsultationResponse, tags=["consultations"])
 async def create_consultation(
     consultation_data: ConsultationCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("patient")),
+    current_user: User = Depends(require_role("patient"))
 ):
     """
     Создает новую консультацию между пациентом и врачом.
     Доступно только для пациентов.
     """
     # Проверяем существование врача
-    doctor = (
-        db.query(User)
-        .filter(User.id == consultation_data.doctor_id, User.role == "doctor")
-        .first()
-    )
+    doctor = db.query(User).filter(User.id == consultation_data.doctor_id, User.role == "doctor").first()
     if not doctor:
         raise HTTPException(status_code=404, detail="Врач не найден")
-
+    
     # Получаем профиль пациента
-    patient_profile = (
-        db.query(PatientProfile)
-        .filter(PatientProfile.user_id == current_user.id)
-        .first()
-    )
+    patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
     if not patient_profile:
         raise HTTPException(status_code=400, detail="Профиль пациента не найден")
-
+    
     # Получаем профиль врача
-    doctor_profile = (
-        db.query(DoctorProfile)
-        .filter(DoctorProfile.user_id == consultation_data.doctor_id)
-        .first()
-    )
+    doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation_data.doctor_id).first()
     if not doctor_profile:
         raise HTTPException(status_code=400, detail="Профиль врача не найден")
-
+    
     # Проверяем, находятся ли врач и пациент в одном районе
-    if (
-        patient_profile.district
-        and doctor_profile.district
-        and patient_profile.district != doctor_profile.district
-    ):
+    if patient_profile.district and doctor_profile.district and patient_profile.district != doctor_profile.district:
         raise HTTPException(
-            status_code=400,
-            detail=f"Врач находится в районе {doctor_profile.district}, а вы в районе {patient_profile.district}. Консультация возможна только с врачами вашего района.",
+            status_code=400, 
+            detail=f"Врач находится в районе {doctor_profile.district}, а вы в районе {patient_profile.district}. Консультация возможна только с врачами вашего района."
         )
-
+    
     # Проверяем, нет ли уже активной консультации с этим врачом
-    existing_consultation = (
-        db.query(Consultation)
-        .filter(
-            Consultation.patient_id == current_user.id,
-            Consultation.doctor_id == consultation_data.doctor_id,
-            Consultation.status.in_(["pending", "active"]),
-        )
-        .first()
-    )
-
+    existing_consultation = db.query(Consultation).filter(
+        Consultation.patient_id == current_user.id,
+        Consultation.doctor_id == consultation_data.doctor_id,
+        Consultation.status.in_(["pending", "active"])
+    ).first()
+    
     if existing_consultation:
         raise HTTPException(
-            status_code=400, detail="У вас уже есть активная консультация с этим врачом"
+            status_code=400,
+            detail="У вас уже есть активная консультация с этим врачом"
         )
-
+    
     # Создаем новую консультацию
     new_consultation = Consultation(
         patient_id=current_user.id,
         doctor_id=consultation_data.doctor_id,
         status="pending",
-        chat_time_limit=5,  # 5 минут по умолчанию
+        chat_time_limit=5  # 5 минут по умолчанию
     )
-
+    
     db.add(new_consultation)
     db.commit()
     db.refresh(new_consultation)
-
+    
     return new_consultation
 
-
 # Эндпоинт для получения списка консультаций пользователя
-@app.get(
-    "/api/consultations",
-    response_model=List[ConsultationResponse],
-    tags=["consultations"],
-)
+@app.get("/api/consultations", response_model=List[ConsultationResponse], tags=["consultations"])
 async def get_consultations(
-    status: Optional[str] = Query(
-        None, description="Фильтр по статусу: pending, active, completed, cancelled"
-    ),
+    status: Optional[str] = Query(None, description="Фильтр по статусу: pending, active, completed, cancelled"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает список консультаций текущего пользователя.
     """
     # Базовый запрос в зависимости от роли пользователя
     if current_user.role == "patient":
-        query = db.query(Consultation).filter(
-            Consultation.patient_id == current_user.id
-        )
+        query = db.query(Consultation).filter(Consultation.patient_id == current_user.id)
     elif current_user.role == "doctor":
         query = db.query(Consultation).filter(Consultation.doctor_id == current_user.id)
     else:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-
+    
     # Применяем фильтр по статусу
     if status:
         query = query.filter(Consultation.status == status)
-
+    
     # Получаем консультации, сортируя по дате создания (новые сначала)
     consultations = query.order_by(Consultation.created_at.desc()).all()
-
+    
     return consultations
 
-
 # Эндпоинт для получения деталей консультации
-@app.get(
-    "/api/consultations/{consultation_id}",
-    response_model=ConsultationResponse,
-    tags=["consultations"],
-)
+@app.get("/api/consultations/{consultation_id}", response_model=ConsultationResponse, tags=["consultations"])
 async def get_consultation(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает детали конкретной консультации.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа (только участники консультации могут видеть детали)
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-        and current_user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
     return consultation
 
-
 # Эндпоинт для начала консультации (активация)
-@app.post(
-    "/api/consultations/{consultation_id}/start",
-    response_model=ConsultationResponse,
-    tags=["consultations"],
-)
+@app.post("/api/consultations/{consultation_id}/start", response_model=ConsultationResponse, tags=["consultations"])
 async def start_consultation(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Начинает консультацию (переводит в статус active).
     Доступно как для пациента, так и для врача.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
     # Проверяем, что консультация в статусе pending
     if consultation.status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Невозможно начать консультацию в статусе {consultation.status}",
-        )
-
+        raise HTTPException(status_code=400, detail=f"Невозможно начать консультацию в статусе {consultation.status}")
+    
     # Обновляем статус консультации
     consultation.status = "active"
     consultation.started_at = datetime.utcnow()
-
+    
     db.commit()
     db.refresh(consultation)
-
+    
     return consultation
 
-
 # Эндпоинт для завершения консультации
-@app.post(
-    "/api/consultations/{consultation_id}/complete",
-    response_model=ConsultationResponse,
-    tags=["consultations"],
-)
+@app.post("/api/consultations/{consultation_id}/complete", response_model=ConsultationResponse, tags=["consultations"])
 async def complete_consultation(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Завершает консультацию (переводит в статус completed).
     Доступно как для пациента, так и для врача.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
     # Проверяем, что консультация в статусе active
     if consultation.status != "active":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Невозможно завершить консультацию в статусе {consultation.status}",
-        )
-
+        raise HTTPException(status_code=400, detail=f"Невозможно завершить консультацию в статусе {consultation.status}")
+    
     # Проверяем, не прошло ли 5 минут с начала консультации
     if consultation.started_at:
         time_elapsed = datetime.utcnow() - consultation.started_at
@@ -2113,56 +1726,41 @@ async def complete_consultation(
             db.commit()
             db.refresh(consultation)
             return consultation
-
+    
     # Если время не истекло, обновляем статус консультации
     consultation.status = "completed"
     consultation.completed_at = datetime.utcnow()
-
+    
     db.commit()
     db.refresh(consultation)
-
+    
     return consultation
 
-
 # Эндпоинт для отправки сообщения в чате консультации
-@app.post(
-    "/api/consultations/{consultation_id}/messages",
-    response_model=MessageResponse,
-    tags=["consultations"],
-)
+@app.post("/api/consultations/{consultation_id}/messages", response_model=MessageResponse, tags=["consultations"])
 async def send_message(
     consultation_id: int,
     message_data: MessageCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Отправляет сообщение в чате консультации.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа (только участники консультации могут отправлять сообщения)
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
     # Проверяем, что консультация активна
     if consultation.status != "active":
-        raise HTTPException(
-            status_code=400,
-            detail="Отправка сообщений возможна только в активной консультации",
-        )
-
+        raise HTTPException(status_code=400, detail="Отправка сообщений возможна только в активной консультации")
+    
     # Проверяем, не истекло ли время консультации (5 минут)
     if consultation.started_at:
         time_elapsed = datetime.utcnow() - consultation.started_at
@@ -2171,195 +1769,146 @@ async def send_message(
             consultation.status = "completed"
             consultation.completed_at = datetime.utcnow()
             db.commit()
-
+            
             raise HTTPException(
-                status_code=400,
-                detail=f"Время консультации (5 минут) истекло. Консультация автоматически завершена.",
+                status_code=400, 
+                detail=f"Время консультации (5 минут) истекло. Консультация автоматически завершена."
             )
-
+    
     # Создаем новое сообщение
     new_message = Message(
         consultation_id=consultation_id,
         sender_id=current_user.id,
         content=message_data.content,
-        is_read=False,
+        is_read=False
     )
-
+    
     db.add(new_message)
     db.commit()
     db.refresh(new_message)
-
+    
     return new_message
 
-
 # Эндпоинт для получения сообщений консультации
-@app.get(
-    "/api/consultations/{consultation_id}/messages",
-    response_model=List[MessageResponse],
-    tags=["consultations"],
-)
+@app.get("/api/consultations/{consultation_id}/messages", response_model=List[MessageResponse], tags=["consultations"])
 async def get_messages(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает все сообщения конкретной консультации.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-        and current_user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к сообщениям этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к сообщениям этой консультации")
+    
     # Получаем сообщения, сортируя по времени отправки
-    messages = (
-        db.query(Message)
-        .filter(Message.consultation_id == consultation_id)
-        .order_by(Message.sent_at)
-        .all()
-    )
-
+    messages = db.query(Message).filter(Message.consultation_id == consultation_id).order_by(Message.sent_at).all()
+    
     # Отмечаем сообщения как прочитанные, если их отправитель не текущий пользователь
     for message in messages:
         if message.sender_id != current_user.id and not message.is_read:
             message.is_read = True
-
+    
     db.commit()
-
+    
     return messages
 
-
 # Эндпоинт для создания отзыва о консультации
-@app.post(
-    "/api/consultations/{consultation_id}/review",
-    response_model=ReviewResponse,
-    tags=["consultations"],
-)
+@app.post("/api/consultations/{consultation_id}/review", response_model=ReviewResponse, tags=["consultations"])
 async def create_review(
     consultation_id: int,
     review_data: ReviewCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("patient")),
+    current_user: User = Depends(require_role("patient"))
 ):
     """
     Создает отзыв о консультации.
     Доступно только для пациента, участвовавшего в консультации.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем, что текущий пользователь является пациентом в этой консультации
     if current_user.id != consultation.patient_id:
-        raise HTTPException(
-            status_code=403, detail="Вы не можете оставить отзыв о чужой консультации"
-        )
-
+        raise HTTPException(status_code=403, detail="Вы не можете оставить отзыв о чужой консультации")
+    
     # Проверяем, что консультация завершена
     if consultation.status != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail="Отзыв можно оставить только о завершенной консультации",
-        )
-
+        raise HTTPException(status_code=400, detail="Отзыв можно оставить только о завершенной консультации")
+    
     # Проверяем, что отзыв оставляется в течение 5 минут после завершения консультации
     if consultation.completed_at:
         time_since_completion = datetime.utcnow() - consultation.completed_at
         if time_since_completion > timedelta(minutes=5):
             raise HTTPException(
-                status_code=400,
-                detail="Время для оставления отзыва истекло (5 минут после завершения консультации)",
+                status_code=400, 
+                detail="Время для оставления отзыва истекло (5 минут после завершения консультации)"
             )
-
+    
     # Проверяем, нет ли уже отзыва о данной консультации
-    existing_review = (
-        db.query(Review).filter(Review.consultation_id == consultation_id).first()
-    )
-
+    existing_review = db.query(Review).filter(Review.consultation_id == consultation_id).first()
+    
     if existing_review:
-        raise HTTPException(
-            status_code=400, detail="Вы уже оставили отзыв об этой консультации"
-        )
-
+        raise HTTPException(status_code=400, detail="Вы уже оставили отзыв об этой консультации")
+    
     # Создаем новый отзыв
     new_review = Review(
         consultation_id=consultation_id,
         rating=review_data.rating,
-        comment=review_data.comment,
+        comment=review_data.comment
     )
-
+    
     db.add(new_review)
     db.commit()
     db.refresh(new_review)
-
+    
     return new_review
 
-
 # Эндпоинт для получения отзыва о консультации
-@app.get(
-    "/api/consultations/{consultation_id}/review",
-    response_model=ReviewResponse,
-    tags=["consultations"],
-)
+@app.get("/api/consultations/{consultation_id}/review", response_model=ReviewResponse, tags=["consultations"])
 async def get_review(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает отзыв о конкретной консультации.
     """
     # Получаем консультацию
-    consultation = (
-        db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    )
-
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
     if not consultation:
         raise HTTPException(status_code=404, detail="Консультация не найдена")
-
+    
     # Проверяем права доступа
-    if (
-        current_user.id != consultation.patient_id
-        and current_user.id != consultation.doctor_id
-        and current_user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=403, detail="У вас нет доступа к этой консультации"
-        )
-
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
+    
     # Получаем отзыв
     review = db.query(Review).filter(Review.consultation_id == consultation_id).first()
-
+    
     if not review:
         raise HTTPException(status_code=404, detail="Отзыв не найден")
-
+    
     return review
 
-
 # Эндпоинт для получения всех отзывов о враче
-@app.get(
-    "/api/doctors/{doctor_id}/reviews",
-    response_model=List[ReviewResponse],
-    tags=["doctors"],
-)
-async def get_doctor_reviews(doctor_id: int, db: Session = Depends(get_db)):
+@app.get("/api/doctors/{doctor_id}/reviews", response_model=List[ReviewResponse], tags=["doctors"])
+async def get_doctor_reviews(
+    doctor_id: int,
+    db: Session = Depends(get_db)
+):
     """
     Получает все отзывы о конкретном враче.
     Доступно без авторизации.
@@ -2368,21 +1917,17 @@ async def get_doctor_reviews(doctor_id: int, db: Session = Depends(get_db)):
     doctor = db.query(User).filter(User.id == doctor_id, User.role == "doctor").first()
     if not doctor:
         raise HTTPException(status_code=404, detail="Врач не найден")
-
+    
     # Получаем все завершенные консультации этого врача
-    consultation_ids = (
-        db.query(Consultation.id)
-        .filter(Consultation.doctor_id == doctor_id, Consultation.status == "completed")
-        .subquery()
-    )
-
+    consultation_ids = db.query(Consultation.id).filter(
+        Consultation.doctor_id == doctor_id,
+        Consultation.status == "completed"
+    ).subquery()
+    
     # Получаем отзывы по этим консультациям
-    reviews = (
-        db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
-    )
-
+    reviews = db.query(Review).filter(Review.consultation_id.in_(consultation_ids)).all()
+    
     return reviews
-
 
 # НОВЫЙ ЭНДПОИНТ ДЛЯ РУЧНОЙ АКТИВАЦИИ АККАУНТА (ТОЛЬКО ДЛЯ РАЗРАБОТКИ)
 @app.post("/manual-activate")
@@ -2390,106 +1935,105 @@ def manual_activate_user(activation_data: dict, db: DbDependency):
     """
     Ручная активация аккаунта пользователя (только для тестирования и разработки).
     В продакшене этот эндпоинт должен быть отключен.
-
+    
     Args:
         activation_data (dict): Словарь с email пользователя.
         db (Session): Сессия базы данных.
-
+        
     Returns:
         dict: Сообщение об успешной активации или ошибка.
     """
     email = activation_data.get("email")
     if not email:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Email не указан"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email не указан"
         )
-
+    
     # Ищем пользователя в базе данных
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Пользователь с таким email не найден",
+            detail="Пользователь с таким email не найден"
         )
-
+    
     # Если пользователь уже активирован, сообщаем об этом
     if user.is_active:
         return {"message": "Этот аккаунт уже активирован"}
-
+    
     # Активируем пользователя
     user.is_active = True
     user.email_verification_token = None
     user.email_verification_token_created_at = None
     db.commit()
-
+    
     # Получаем верификационный токен из логов
     token = user.email_verification_token
-
+    
     return {
         "message": "Аккаунт успешно активирован",
         "user_email": user.email,
-        "is_active": user.is_active,
+        "is_active": user.is_active
     }
-
 
 # Эндпоинт для загрузки аватара пользователя
 @app.post("/users/me/avatar", response_model=UserResponse)
 async def upload_avatar(
     avatar: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Загружает и обновляет аватар пользователя.
-
+    
     Args:
         avatar: Файл изображения аватара
         db: Сессия базы данных
         current_user: Текущий аутентифицированный пользователь
-
+        
     Returns:
         UserResponse: Обновленные данные пользователя с путём к аватару
     """
     # Проверяем тип файла (только изображения)
     allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     file_type = avatar.content_type
-
+    
     if file_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Только изображения форматов JPEG, PNG, GIF и WEBP разрешены для аватара",
+            detail="Только изображения форматов JPEG, PNG, GIF и WEBP разрешены для аватара"
         )
-
+    
     # Создаем директорию для аватаров, если она не существует
     avatar_dir = os.path.join(UPLOAD_DIR, "avatars")
     if not os.path.exists(avatar_dir):
         os.makedirs(avatar_dir)
-
+    
     # Генерируем уникальное имя файла
     file_extension = os.path.splitext(avatar.filename)[1]
     filename = f"{uuid.uuid4()}{file_extension}"
     file_path = os.path.join(avatar_dir, filename)
-
+    
     # Сохраняем файл
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(avatar.file, buffer)
-
+    
     # Если у пользователя уже есть аватар, удаляем старый файл
     if current_user.avatar_path:
-        old_file_path = os.path.join(os.getcwd(), current_user.avatar_path.lstrip("/"))
+        old_file_path = os.path.join(os.getcwd(), current_user.avatar_path.lstrip('/'))
         if os.path.exists(old_file_path):
             try:
                 os.remove(old_file_path)
             except Exception as e:
                 print(f"Error removing old avatar: {e}")
-
+    
     # Обновляем путь к аватару в базе данных
     current_user.avatar_path = f"/uploads/avatars/{filename}"
     db.commit()
     db.refresh(current_user)
-
+    
     return current_user
-
 
 # Модель для получения списка уведомлений
 class NotificationResponse(BaseModel):
@@ -2499,46 +2043,37 @@ class NotificationResponse(BaseModel):
     type: str
     is_viewed: bool
     created_at: datetime
-
+    
     class Config:
         from_attributes = True
-
 
 # Класс для списка уведомлений
 class NotificationList(BaseModel):
     items: List[NotificationResponse]
 
-
 # Эндпоинт для получения уведомлений пользователя
 @app.get("/notifications", response_model=NotificationList)
 async def get_notifications(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает список уведомлений для текущего пользователя.
     """
     # Получаем заявки на роль врача для текущего пользователя
-    applications = (
-        db.query(DoctorApplication)
-        .filter(DoctorApplication.user_id == current_user.id)
-        .order_by(DoctorApplication.created_at.desc())
-        .all()
-    )
-
+    applications = db.query(DoctorApplication).filter(
+        DoctorApplication.user_id == current_user.id
+    ).order_by(DoctorApplication.created_at.desc()).all()
+    
     # Формируем уведомления на основе заявок
     notifications = []
     for app in applications:
         # Проверяем, просмотрено ли уведомление
-        viewed = (
-            db.query(ViewedNotification)
-            .filter(
-                ViewedNotification.user_id == current_user.id,
-                ViewedNotification.application_id == app.id,
-            )
-            .first()
-            is not None
-        )
-
+        viewed = db.query(ViewedNotification).filter(
+            ViewedNotification.user_id == current_user.id,
+            ViewedNotification.application_id == app.id
+        ).first() is not None
+        
         # Формируем заголовок и сообщение в зависимости от статуса заявки
         title = "Заявка на роль врача"
         if app.status == "pending":
@@ -2553,82 +2088,68 @@ async def get_notifications(
         else:
             message = f"Статус заявки изменен на: {app.status}"
             type_name = "info"
-
+        
         # Добавляем уведомление в список
-        notifications.append(
-            {
-                "id": app.id,
-                "title": title,
-                "message": message,
-                "type": type_name,
-                "is_viewed": viewed,
-                "created_at": app.created_at,
-            }
-        )
-
+        notifications.append({
+            "id": app.id,
+            "title": title,
+            "message": message,
+            "type": type_name,
+            "is_viewed": viewed,
+            "created_at": app.created_at
+        })
+    
     # Возвращаем список уведомлений
     return {"items": notifications}
 
-
 # Эндпоинт для отметки уведомления как прочитанного
-@app.post(
-    "/notifications/{notification_id}/view", status_code=status.HTTP_204_NO_CONTENT
-)
+@app.post("/notifications/{notification_id}/view", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_notification_as_read(
     notification_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Отмечает уведомление как прочитанное.
     """
     # Получаем заявку по ID
-    application = (
-        db.query(DoctorApplication)
-        .filter(
-            DoctorApplication.id == notification_id,
-            DoctorApplication.user_id == current_user.id,
-        )
-        .first()
-    )
-
+    application = db.query(DoctorApplication).filter(
+        DoctorApplication.id == notification_id,
+        DoctorApplication.user_id == current_user.id
+    ).first()
+    
     if not application:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Уведомление не найдено"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Уведомление не найдено"
         )
-
+    
     # Проверяем, не было ли уже просмотрено уведомление
-    existing_notification = (
-        db.query(ViewedNotification)
-        .filter(
-            ViewedNotification.user_id == current_user.id,
-            ViewedNotification.application_id == notification_id,
-        )
-        .first()
-    )
-
+    existing_notification = db.query(ViewedNotification).filter(
+        ViewedNotification.user_id == current_user.id,
+        ViewedNotification.application_id == notification_id
+    ).first()
+    
     if not existing_notification:
         # Если нет, создаем новую запись
         viewed_notification = ViewedNotification(
-            user_id=current_user.id, application_id=notification_id
+            user_id=current_user.id,
+            application_id=notification_id
         )
         db.add(viewed_notification)
         db.commit()
-
+    
     # Возвращаем 204 No Content (успешно, но без тела ответа)
     return None
-
 
 # Модель запроса с CSRF токеном для защиты форм
 class CsrfProtectedRequest(BaseModel):
     csrf_token: str
-
-
+    
 # Класс для смены пароля с CSRF защитой
 class ChangePasswordRequest(CsrfProtectedRequest):
     current_password: str
     new_password: str
-
 
 # Эндпоинт для получения CSRF токена для защиты форм
 @app.get("/csrf-token")
@@ -2640,13 +2161,12 @@ async def get_csrf_token(current_user: CurrentUser):
     csrf_token = create_csrf_token(current_user.id)
     return {"csrf_token": csrf_token}
 
-
 # Эндпоинт для смены пароля пользователя
 @app.post("/users/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     password_data: ChangePasswordRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Изменяет пароль текущего пользователя.
@@ -2655,41 +2175,38 @@ async def change_password(
     if current_user.auth_provider != "email":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password change is not available for OAuth users",
+            detail="Password change is not available for OAuth users"
         )
-
+    
     # Проверяем CSRF токен
     if not verify_csrf_token(current_user.id, password_data.csrf_token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or expired CSRF token",
+            detail="Invalid or expired CSRF token"
         )
-
+    
     # Проверяем текущий пароль
-    if not verify_password(
-        password_data.current_password, current_user.hashed_password
-    ):
+    if not verify_password(password_data.current_password, current_user.hashed_password):
         # Защита от перебора: не раскрываем информацию о корректности текущего пароля
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password change failed. Please check your input and try again.",
+            detail="Password change failed. Please check your input and try again."
         )
-
+    
     # Проверяем требования к новому паролю
     if len(password_data.new_password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be at least 8 characters long",
+            detail="New password must be at least 8 characters long"
         )
-
+    
     # Хешируем новый пароль и обновляем в БД
     hashed_password = get_password_hash(password_data.new_password)
     current_user.hashed_password = hashed_password
     db.commit()
-
+    
     # Возвращаем 204 No Content (успешно, но без тела ответа)
     return None
-
 
 # Модель для запроса обновления настроек уведомлений
 class NotificationSettingsUpdate(CsrfProtectedRequest):
@@ -2697,54 +2214,50 @@ class NotificationSettingsUpdate(CsrfProtectedRequest):
     push_notifications: bool = True
     appointment_reminders: bool = True
 
-
 # Модель для ответа с настройками уведомлений
 class NotificationSettingsResponse(BaseModel):
     email_notifications: bool
     push_notifications: bool
     appointment_reminders: bool
     updated_at: datetime
-
+    
     class Config:
         from_attributes = True
-
 
 # Эндпоинт для получения настроек уведомлений пользователя
 @app.get("/users/me/notification-settings", response_model=NotificationSettingsResponse)
 async def get_notification_settings(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получает настройки уведомлений для текущего пользователя.
     """
     # Проверяем, есть ли у пользователя настройки уведомлений
-    settings = (
-        db.query(UserNotificationSettings)
-        .filter(UserNotificationSettings.user_id == current_user.id)
-        .first()
-    )
-
+    settings = db.query(UserNotificationSettings).filter(
+        UserNotificationSettings.user_id == current_user.id
+    ).first()
+    
     # Если настроек нет, создаем настройки по умолчанию
     if not settings:
         settings = UserNotificationSettings(
             user_id=current_user.id,
             email_notifications=True,
             push_notifications=True,
-            appointment_reminders=True,
+            appointment_reminders=True
         )
         db.add(settings)
         db.commit()
         db.refresh(settings)
-
+    
     return settings
-
 
 # Эндпоинт для обновления настроек уведомлений пользователя
 @app.put("/users/me/notification-settings", response_model=NotificationSettingsResponse)
 async def update_notification_settings(
     settings_data: NotificationSettingsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Обновляет настройки уведомлений для текущего пользователя.
@@ -2752,23 +2265,22 @@ async def update_notification_settings(
     # Проверяем CSRF токен
     if not verify_csrf_token(current_user.id, settings_data.csrf_token):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid CSRF token"
         )
-
+        
     # Проверяем, есть ли у пользователя настройки уведомлений
-    settings = (
-        db.query(UserNotificationSettings)
-        .filter(UserNotificationSettings.user_id == current_user.id)
-        .first()
-    )
-
+    settings = db.query(UserNotificationSettings).filter(
+        UserNotificationSettings.user_id == current_user.id
+    ).first()
+    
     # Если настроек нет, создаем новые с переданными данными
     if not settings:
         settings = UserNotificationSettings(
             user_id=current_user.id,
             email_notifications=settings_data.email_notifications,
             push_notifications=settings_data.push_notifications,
-            appointment_reminders=settings_data.appointment_reminders,
+            appointment_reminders=settings_data.appointment_reminders
         )
         db.add(settings)
     else:
@@ -2776,44 +2288,8 @@ async def update_notification_settings(
         settings.email_notifications = settings_data.email_notifications
         settings.push_notifications = settings_data.push_notifications
         settings.appointment_reminders = settings_data.appointment_reminders
-
+    
     db.commit()
     db.refresh(settings)
-
+    
     return settings
-
-
-# Эндпоинт для проверки существования email
-@app.post("/users/check-email")
-def check_email_exists(email_data: dict, db: DbDependency):
-    """
-    Проверяет, существует ли пользователь с указанным email.
-    Используется при регистрации для предотвращения дублирования email.
-    
-    Args:
-        email_data (dict): Словарь с email пользователя
-        db (Session): Сессия базы данных
-        
-    Returns:
-        dict: Информация о существовании email и провайдере аутентификации
-    """
-    email = email_data.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email не указан"
-        )
-    
-    # Ищем пользователя в базе данных
-    user = db.query(User).filter(User.email == email).first()
-    
-    if user:
-        return {
-            "exists": True,
-            "auth_provider": user.auth_provider
-        }
-    
-    return {
-        "exists": False,
-        "auth_provider": None
-    }

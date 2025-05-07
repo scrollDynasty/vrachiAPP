@@ -74,24 +74,18 @@ const VerifyEmailPage = () => {
               setAuthenticated(true);
               
               // Показываем уведомление об успешном подтверждении
-              toast.success('Email успешно подтвержден! Вход выполнен автоматически.', {
+              toast.success('Email успешно подтвержден! Переходим в ваш профиль.', {
                 autoClose: 3000
               });
               
-              // Запускаем таймер перенаправления на главную страницу
-              const countdownInterval = setInterval(() => {
-                setRedirectCountdown(prev => {
-                  if (prev <= 1) {
-                    clearInterval(countdownInterval);
-                    navigate('/');
-                    return 0;
-                  }
-                  return prev - 1;
-                });
-              }, 1000);
+              // Сразу перенаправляем на страницу профиля без таймера
+              navigate('/profile');
               
-              // Очистка интервала при размонтировании компонента
-              return () => clearInterval(countdownInterval);
+              // Очищаем данные о токене верификации, так как он больше не нужен
+              localStorage.removeItem('emailVerificationToken');
+              localStorage.removeItem('emailVerificationStartTime');
+              
+              return;
             } catch (err) {
               console.error('Error fetching user data after email verification:', err);
             }
@@ -447,7 +441,7 @@ const VerifyEmailPage = () => {
                     <p>Проверьте вашу почту.</p>
                   </div>
                 )}
-                
+
                 {resendError && (
                   <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200 animate-fadeIn">
                     <p>{resendError}</p>

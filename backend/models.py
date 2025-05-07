@@ -142,6 +142,21 @@ class DoctorApplication(Base):
     user = relationship("User", back_populates="doctor_applications")
 
 
+# Модель для хранения настроек уведомлений пользователя
+class UserNotificationSettings(Base):
+    __tablename__ = "user_notification_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    email_notifications = Column(Boolean, default=True) # Уведомления по email
+    push_notifications = Column(Boolean, default=True) # Push-уведомления в браузере
+    appointment_reminders = Column(Boolean, default=True) # Напоминания о консультациях
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Отношение к пользователю
+    user = relationship("User", backref="notification_settings")
+
+
 # Модель для хранения информации о просмотренных уведомлениях
 class ViewedNotification(Base):
     __tablename__ = "viewed_notifications"

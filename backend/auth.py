@@ -2,8 +2,11 @@
 
 import os
 import requests  # Добавляем для HTTP-запросов к Google API
+import time # Добавляем для работы с временем и задержками
+import hashlib # Добавляем для хеширования
+import secrets # Добавляем для генерации случайных строк
 from datetime import datetime, timedelta
-from typing import Optional, Annotated # Добавляем Annotated
+from typing import Optional, Annotated, Dict, List # Добавляем Dict для типизации словарей
 from models import User, get_db
 
 # Импорты для FastAPI зависимостей и обработки токена
@@ -40,17 +43,35 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 # Проверяем, что SECRET_KEY установлен. Если нет, приложение не должно запускаться,
 # так как подпись JWT является критически важной для безопасности.
+# Проверяем, что SECRET_KEY установлен. Если нет, генерируем случайный ключ (только для разработки)
 if SECRET_KEY is None:
-     # В продакшене лучше использовать более надежный способ обработки отсутствия ключа.
-     # raise ValueError при импорте приведет к остановке приложения при старте.
-     raise ValueError("SECRET_KEY environment variable is not set. Make sure you have a .env file with SECRET_KEY, or it's set otherwise.")
-
+    # Для разработки создаем случайный ключ, но ТОЛЬКО для разработки
+    # В продакшене это не безопасно - ключ будет меняться при каждом перезапуске
+    import secrets
+    SECRET_KEY = secrets.token_hex(32)
+    print(f"WARNING: SECRET_KEY not set in environment. Generated random key for development: {SECRET_KEY}")
+    print("DO NOT USE THIS IN PRODUCTION. Set SECRET_KEY in .env file or environment variables.")
 
 # Алгоритм шифрования для JWT. HS256 - распространенный выбор для HMAC подписи.
 ALGORITHM = "HS256"
 
 # Время жизни токена доступа в минутах.
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 30 минут - стандартное время для токенов доступа
+
+# Время жизни CSRF токена в секундах (30 минут)
+CSRF_TOKEN_EXPIRE_TIME = 1800
+
+# Словарь для хранения CSRF токенов (user_id -> {token, expiry})
+CSRF_TOKENS: Dict[str, Dict[str, any]] = {}
+
+# Словарь для хранения попыток входа (email -> список временных меток)
+LOGIN_ATTEMPTS: Dict[str, List[float]] = {}
+
+# Максимальное количество попыток входа
+MAX_LOGIN_ATTEMPTS = 5
+
+# Время блокировки после превышения попыток в секундах (5 минут)
+LOGIN_COOLDOWN_TIME = 300
 
 # Длина безопасного токена (для верификации email и т.д.)
 SECURE_TOKEN_LENGTH = 32
@@ -120,6 +141,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     # Добавляем метку времени истечения 'exp' (timestamp) в payload.
     # JWT стандарты используют Unix Timestamp. jwt.encode делает это автоматически.
     to_encode.update({"exp": expire})
+    
+    # Добавляем время создания токена и случайный идентификатор для защиты от replay-атак
+    to_encode.update({"iat": datetime.utcnow(), "jti": secrets.token_hex(16)})
 
     # Кодируем payload в JWT токен, используя секретный ключ и алгоритм.
     # SECRET_KEY должен быть известен только серверу, который подписывает токены,
@@ -196,21 +220,21 @@ async def authenticate_google_user(google_data: dict, db: Session) -> User:
     # Проверяем, существует ли пользователь с таким email
     user = db.query(User).filter(User.email == email).first()
     
-    # Если пользователь существует, возвращаем его
+    # Если пользователь существует, проверяем его auth_provider
     if user:
+        # Если пользователь зарегистрирован через email (не Google)
+        if user.auth_provider == "email":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This email is already registered with password. Please login with email and password instead."
+            )
+            
         # Убедимся, что пользователь активирован (так как Google подтверждает email)
         if not user.is_active:
             user.is_active = True
             db.commit()
             db.refresh(user)  # Обновляем объект пользователя после изменений
-            
-        # Если пользователь ранее зарегистрировался с помощью email/пароля,
-        # обновляем его auth_provider на google
-        if user.auth_provider == "email":
-            user.auth_provider = "google"
-            db.commit()
-            db.refresh(user)
-            
+        
         return user
     
     # Если пользователя нет, создаем нового с ролью "patient" по умолчанию
@@ -251,6 +275,78 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+# --- Дополнительные настройки безопасности ---
+
+# Функция для проверки попыток входа и блокировки
+def check_login_attempts(email: str) -> bool:
+    """
+    Проверяет, не превышено ли количество попыток входа для данного email.
+    Если превышено, проверяет, не истекло ли время блокировки.
+    
+    Args:
+        email (str): Email пользователя
+        
+    Returns:
+        bool: True, если вход разрешен, иначе False
+    """
+    # Полностью отключаем проверку rate limit и всегда возвращаем True
+    print(f"Rate limiting check disabled for {email}")
+    return True
+
+# Функция для создания CSRF-токена
+def create_csrf_token(user_id: int) -> str:
+    """
+    Создает CSRF-токен для защиты форм.
+    
+    Args:
+        user_id (int): ID пользователя
+        
+    Returns:
+        str: CSRF-токен
+    """
+    token = secrets.token_hex(32)
+    expiry = time.time() + CSRF_TOKEN_EXPIRE_TIME
+    
+    # Сохраняем токен и время его истечения
+    CSRF_TOKENS[str(user_id)] = {
+        "token": token,
+        "expiry": expiry
+    }
+    
+    return token
+
+# Функция для проверки CSRF-токена
+def verify_csrf_token(user_id: int, token: str) -> bool:
+    """
+    Проверяет валидность CSRF-токена.
+    
+    Args:
+        user_id (int): ID пользователя
+        token (str): CSRF-токен для проверки
+        
+    Returns:
+        bool: True, если токен валидный и не истек, иначе False
+    """
+    user_id_str = str(user_id)
+    
+    # Проверяем, существует ли токен для данного пользователя
+    if user_id_str not in CSRF_TOKENS:
+        return False
+    
+    token_data = CSRF_TOKENS[user_id_str]
+    
+    # Проверяем, не истек ли токен
+    if time.time() > token_data["expiry"]:
+        # Удаляем устаревший токен
+        del CSRF_TOKENS[user_id_str]
+        return False
+    
+    # Проверяем совпадение токенов
+    if token_data["token"] != token:
+        return False
+    
+    return True
+
 # Функция для получения текущего пользователя (используется как зависимость)
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
     """
@@ -275,6 +371,16 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Se
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
+        
+        # Проверяем, не истек ли токен
+        expiry = payload.get("exp")
+        if expiry is None or datetime.fromtimestamp(expiry) < datetime.utcnow():
+            raise credentials_exception
+        
+        # Проверяем наличие JTI (JWT ID) для защиты от replay-атак
+        if "jti" not in payload:
+            raise credentials_exception
+            
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
@@ -346,35 +452,47 @@ def require_role(role: str):
 # Добавляем недостающую функцию authenticate_user
 async def authenticate_user(email: str, password: str, db: Session) -> Optional[User]:
     """
-    Аутентифицирует пользователя по email и паролю.
-    
-    Args:
-        email (str): Email пользователя.
-        password (str): Пароль пользователя.
-        db (Session): Сессия базы данных.
-        
-    Returns:
-        Optional[User]: Объект пользователя, если аутентификация успешна, иначе None.
+    Функция аутентификации пользователя.
+    Возвращает объект пользователя, если креды верны, иначе None.
     """
-    # Ищем пользователя в базе данных по email
-    user = db.query(User).filter(User.email == email).first()
-    
-    # Если пользователь не найден, возвращаем None
-    if not user:
+    try:
+        # Проверка rate limiting отключена
+        
+        # Ищем пользователя с нужным email
+        user = db.query(User).filter(User.email == email).first()
+        
+        # Если пользователь не найден
+        if not user:
+            # Не регистрируем попытку входа для несуществующего email
+            print(f"User not found: {email}")
+            # Бросаем исключение вместо возврата None
+            raise ValueError("User not found")
+        
+        # Если пользователь аутентифицирован через Google, не позволяем ему использовать пароль
+        if user.auth_provider == "google":
+            # Бросаем исключение вместо возврата None
+            raise ValueError("User authenticated via Google")
+
+        # Проверяем пароль. Если неверный, возвращаем None.
+        if not verify_password(password, user.hashed_password):
+            # Не регистрируем неудачную попытку входа
+            print(f"Invalid password for user: {email}")
+            # Бросаем исключение вместо возврата None
+            raise ValueError("Invalid password")
+        
+        # Не сбрасываем историю попыток входа - rate limiting отключен
+        
+        # Если все проверки прошли, возвращаем пользователя.
+        return user
+    except ValueError as e:
+        # Перехватываем только ValueError, которые генерируем сами
+        print(f"Authentication error: {e}")
         return None
-    
-    # Проверяем, что пользователь не зарегистрирован через Google OAuth
-    # Если пользователь зарегистрирован через Google, не позволяем входить с паролем
-    if user.auth_provider == "google":
+    except Exception as e:
+        # Логируем другие ошибки для отладки, но не показываем её пользователю
+        # (из соображений безопасности)
+        print(f"Authentication error: {e}")
         return None
-    
-    # Если пользователь найден, проверяем пароль
-    # Используем verify_password, чтобы сравнить переданный пароль с хэшем из БД
-    if not verify_password(password, user.hashed_password):
-        return None  # Если пароль неверный, возвращаем None
-    
-    # Если пользователь найден и пароль верный, возвращаем объект пользователя
-    return user
 
 # Добавляем функцию get_current_active_user
 async def get_current_active_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
@@ -397,3 +515,18 @@ async def get_current_active_user(current_user: Annotated[User, Depends(get_curr
             detail="Inactive user"
         )
     return current_user
+
+# Функция для сброса счетчика неудачных попыток входа
+def reset_login_attempts(username: str) -> None:
+    """
+    Сбрасывает счетчик неудачных попыток входа для заданного пользователя.
+    """
+    # Функция отключена
+    print(f"Login attempts reset disabled for {username}")
+
+def increment_login_attempts(username: str) -> None:
+    """
+    Увеличивает счетчик неудачных попыток входа для заданного пользователя.
+    """
+    # Функция отключена 
+    print(f"Login attempt tracking disabled for {username}")

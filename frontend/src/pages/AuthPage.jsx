@@ -22,6 +22,8 @@ function AuthPage() {
   const [currentTab, setCurrentTab] = useState('login'); // Изначально активна вкладка Входа
   const [animateCard, setAnimateCard] = useState(false);
   const [formTransition, setFormTransition] = useState(false);
+  // Состояние для отслеживания завершения регистрации с требованием подтверждения email
+  const [registrationCompleted, setRegistrationCompleted] = useState(false);
 
   const navigate = useNavigate(); // Хук для программной навигации
   const location = useLocation(); // Хук для получения информации о текущем URL (путь, параметры и т.д.)
@@ -30,7 +32,7 @@ function AuthPage() {
   // isAuthLoading: статус загрузки инициализации стора при старте приложения
   // isAuthenticated: статус авторизации пользователя
   // authError: последняя ошибка, связанная с аутентификацией (логин, регистрация) из стора
-  const { isAuthenticated, isLoading: isAuthLoading, error: authError } = useAuthStore();
+  const { isAuthenticated, isLoading: isAuthLoading, error: authError, user, pendingVerificationEmail } = useAuthStore();
   // Получаем функции логина и регистрации из стора. Они будут переданы компонентам форм.
   const login = useAuthStore((state) => state.login);
   const registerUser = useAuthStore((state) => state.registerUser);
@@ -55,21 +57,139 @@ function AuthPage() {
     }
   }, [location.pathname]);
 
-  // Эффект для перенаправления пользователя на главную страницу после успешной авторизации
   useEffect(() => {
-    if (!isAuthLoading && isAuthenticated) {
-       console.log("AuthPage: User authenticated, redirecting to home.");
-      navigate('/'); 
-    }
-  }, [isAuthenticated, isAuthLoading, navigate]);
+    console.log('AuthPage REDIRECT CHECK:', { 
+      isAuthenticated, 
+      user, 
+      authError, 
+      isAuthLoading,
+      token: useAuthStore.getState().token,
+      pendingVerificationEmail,
+      registrationCompleted
+    });
 
-  // Эффект для сброса ошибок при смене URL
+    // Если была успешная регистрация с требованием подтверждения email
+    if (registrationCompleted && pendingVerificationEmail) {
+      console.log('AuthPage: Registration completed, redirecting to verify-email page');
+      setRegistrationCompleted(false); // Сбрасываем флаг после перенаправления
+      navigate('/verify-email');
+      return;
+    }
+
+    // Проверяем все необходимые условия для редиректа на главную
+    const shouldRedirect = 
+      isAuthenticated && // Пользователь аутентифицирован
+      user && // Есть данные пользователя
+      !authError && // Нет ошибок
+      !isAuthLoading && // Загрузка завершена
+      useAuthStore.getState().token; // Есть валидный токен
+
+    if (shouldRedirect) {
+      console.log('AuthPage: Все условия для редиректа выполнены, перенаправляем на главную');
+      navigate('/');
+    } else {
+      console.log('AuthPage: Условия для редиректа не выполнены:', {
+        isAuthenticated,
+        hasUser: !!user,
+        hasError: !!authError,
+        isLoading: isAuthLoading,
+        hasToken: !!useAuthStore.getState().token
+      });
+    }
+  }, [isAuthenticated, user, authError, isAuthLoading, navigate, pendingVerificationEmail, registrationCompleted]);
+
+  // Сброс ошибки при смене пути
   useEffect(() => {
     useAuthStore.setState({ error: null });
   }, [location.pathname]);
 
   // Проверяем, есть ли ошибка, связанная с Google Auth
   const isGoogleAuthError = authError && authError.includes("registered with Google");
+
+  // Обработчик входа пользователя
+  const handleLogin = async (email, password, rememberMe = false) => {
+    console.log('AuthPage: Handling login for email:', email);
+    
+    try {
+      // Очищаем текущее состояние перед новой попыткой входа
+      useAuthStore.setState({ error: null });
+      
+      // Вызываем функцию login из authStore
+      await login(email, password);
+      
+      console.log('AuthPage: Login successful, state:', { 
+        isAuthenticated: useAuthStore.getState().isAuthenticated,
+        hasUser: !!useAuthStore.getState().user,
+        hasToken: !!useAuthStore.getState().token,
+        error: useAuthStore.getState().error
+      });
+      
+      // Здесь можно выполнить дополнительные действия после успешного входа
+      // Но редирект должен происходить автоматически в useEffect с зависимостью от isAuthenticated
+    } catch (error) {
+      console.error('AuthPage: Login failed:', error);
+      
+      // Проверяем, что состояние в authStore корректно сброшено
+      if (useAuthStore.getState().isAuthenticated || useAuthStore.getState().user || useAuthStore.getState().token) {
+        console.warn('AuthPage: Auth state not properly reset after login failure, forcing reset');
+        
+        // Принудительно сбрасываем состояние, если оно не было сброшено в login
+        useAuthStore.setState({
+          isAuthenticated: false,
+          user: null,
+          token: null,
+          error: error.message || "Ошибка при входе"
+        });
+      }
+      
+      // Пробрасываем ошибку дальше, чтобы компонент LoginForm мог её обработать
+      throw error;
+    }
+  };
+
+  // Обработчик регистрации пользователя
+  const handleRegister = async (userData) => {
+    console.log('AuthPage: Handling registration for email:', userData.email);
+
+    try {
+      // Очищаем текущее состояние перед новой попыткой регистрации
+      useAuthStore.setState({ error: null });
+
+      // Вызываем функцию registerUser из authStore
+      const result = await registerUser(userData);
+
+      console.log('AuthPage: Registration result:', result);
+
+      // Проверяем, требуется ли подтверждение email
+      if (result && result.requiresEmailVerification) {
+        console.log('AuthPage: Registration successful, email verification required');
+        // Устанавливаем флаг завершения регистрации для перенаправления на страницу подтверждения
+        setRegistrationCompleted(true);
+      } else if (useAuthStore.getState().isAuthenticated) {
+        console.log('AuthPage: Registration successful, user authenticated');
+        // Редирект произойдет автоматически через useEffect с isAuthenticated
+      }
+
+      return result;
+    } catch (error) {
+      console.error('AuthPage: Registration failed:', error);
+      
+      // Проверяем, что состояние корректно сброшено
+      if (useAuthStore.getState().isAuthenticated || useAuthStore.getState().user || useAuthStore.getState().token) {
+        console.warn('AuthPage: Auth state not properly reset after registration failure, forcing reset');
+        
+        useAuthStore.setState({
+          isAuthenticated: false,
+          user: null,
+          token: null,
+          error: error.message || "Ошибка при регистрации"
+        });
+      }
+      
+      // Пробрасываем ошибку для обработки в форме
+      throw error;
+    }
+  };
 
   // Обработчик входа через Google
   const handleGoogleLogin = () => {
@@ -95,8 +215,8 @@ function AuthPage() {
     }, 300);
   };
 
-  // Если пользователь в процессе инициализации стора (проверка токена при старте)
-  if (isAuthLoading) {
+  // Показываем лоадер только при начальной загрузке
+  if (isAuthLoading && !user && !authError) {
     return (
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
         <div className="text-center">
@@ -107,8 +227,8 @@ function AuthPage() {
     );
   }
 
-  // Если пользователь уже авторизован
-  if (isAuthenticated) {
+  // Не показываем страницу, если пользователь уже аутентифицирован
+  if (isAuthenticated && user && !authError && !isAuthLoading) {
     return null;
   }
 
@@ -264,12 +384,12 @@ function AuthPage() {
               <div className={`transform transition-all duration-300 ${formTransition ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
                 {currentTab === 'login' && (
                   <div className="animate-fade-in">
-                <LoginForm onSubmit={login} isLoading={isFormLoading} error={authError} />
+                <LoginForm onSubmit={handleLogin} isLoading={isFormLoading} error={authError} />
                   </div>
             )}
                 {currentTab === 'register' && (
                   <div className="animate-fade-in">
-                <RegisterForm onSubmit={registerUser} isLoading={isFormLoading} error={authError} />
+                <RegisterForm onSubmit={handleRegister} isLoading={isFormLoading} error={authError} />
                   </div>
             )}
               </div>

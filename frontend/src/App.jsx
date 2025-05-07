@@ -12,7 +12,6 @@ import SearchDoctorsPage from './pages/SearchDoctorsPage'
 import DoctorProfilePage from './pages/DoctorProfilePage'
 import HistoryPage from './pages/HistoryPage'
 import GoogleAuthCallback from './pages/GoogleAuthCallback'
-import CompleteProfilePage from './pages/CompleteProfilePage'
 import AdminPage from './pages/AdminPage'
 import DoctorApplicationPage from './pages/DoctorApplicationPage'
 import AdminLoginPage from './pages/AdminLoginPage'
@@ -34,10 +33,10 @@ import './index.scss'
 function App() {
   // Получаем из стора функцию инициализации, состояние аутентификации и загрузки
   const initializeAuth = useAuthStore((state) => state.initializeAuth)
-  const { isAuthenticated, isLoading, needsProfileUpdate } = useAuthStore()
+  const { isAuthenticated, isLoading, user, token, pendingVerificationEmail } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
-  const user = useAuthStore((state) => state.user)
+  const error = useAuthStore((state) => state.error)
 
   // Эффект для инициализации стора аутентификации при монтировании компонента App
   useEffect(() => {
@@ -45,8 +44,33 @@ function App() {
     initializeAuth()
   }, [initializeAuth])
   
+  // Отслеживаем изменения в состоянии аутентификации
+  useEffect(() => {
+    console.log('App: Auth state changed:', {
+      isAuthenticated,
+      hasUser: !!user,
+      hasToken: !!token,
+      pendingVerificationEmail: pendingVerificationEmail,
+      isLoading,
+      error,
+      currentPath: location.pathname
+    });
+  }, [isAuthenticated, user, token, isLoading, error, location.pathname, pendingVerificationEmail]);
+  
+  // Отслеживаем изменения только в маршруте для отладки белого экрана
+  useEffect(() => {
+    console.log('App: Route changed to:', location.pathname, {
+      state: location.state,
+      search: location.search,
+      hash: location.hash
+    });
+  }, [location]);
+  
   // Перенаправляем неаутентифицированных пользователей на страницу логина
   useEffect(() => {
+    // Получаем ошибку аутентификации из стора
+    const authError = useAuthStore.getState().error;
+    
     // Публичные маршруты, доступные всем пользователям
     const publicRoutes = [
       '/login', 
@@ -62,18 +86,51 @@ function App() {
       location.pathname === route || location.pathname.startsWith(route)
     );
     
+    console.log('App: Navigation check:', {
+      currentPath: location.pathname,
+      isPublicRoute,
+      authError: authError ? 'exists' : 'none',
+      isAuthenticated,
+      isLoading,
+      error,
+      pendingVerificationEmail
+    });
+    
+    // Если есть ошибка аутентификации - перенаправляем на логин (кроме публичных маршрутов)
+    if (!isPublicRoute && authError) {
+      console.log("App: Authentication error detected, redirecting to login page:", authError);
+      navigate('/login');
+      return;
+    }
+    
+    // Если есть ожидающий подтверждения email и мы не на странице подтверждения - перенаправляем туда
+    if (pendingVerificationEmail && location.pathname !== '/verify-email') {
+      console.log("App: User has pending email verification, redirecting to verify-email page");
+      navigate('/verify-email');
+      return;
+    }
+    
     // Если путь не публичный, загрузка завершена и пользователь не авторизован - перенаправляем на логин
     if (!isPublicRoute && !isLoading && !isAuthenticated) {
+      console.log("App: User not authenticated, redirecting to login page");
       navigate('/login');
     } 
-    // Если пользователь авторизован, но требуется обновление профиля - перенаправляем на соответствующую страницу
-    else if (!isLoading && isAuthenticated && needsProfileUpdate && location.pathname !== '/complete-profile') {
-      navigate('/complete-profile');
-    }
-  }, [isLoading, isAuthenticated, needsProfileUpdate, navigate, location.pathname]);
+  }, [isLoading, isAuthenticated, navigate, location.pathname, error, pendingVerificationEmail]);
+
+  // Добавьте логи в рендер
+  console.log('App: Rendering with state:', {
+    isAuthenticated,
+    hasUser: !!user,
+    hasToken: !!token,
+    isLoading,
+    currentPath: location.pathname,
+    errorExists: !!error,
+    pendingVerificationEmail
+  });
 
   // Если идет загрузка инициализации стора
   if (isLoading) {
+    console.log('App: Showing loading state');
     return (
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-b from-blue-50 to-white">
         <div className="text-center">
@@ -85,10 +142,18 @@ function App() {
   }
 
   // Основной UI приложения
+  console.log('App: Rendering main UI', {
+    showHeader: isAuthenticated && user && !error,
+    currentPath: location.pathname,
+    isAuthenticated,
+    hasUser: !!user,
+    hasToken: !!token
+  });
+  
   return (
     <div className="App bg-gradient-to-b from-blue-50/30 to-white min-h-screen">
-      {/* Хедер приложения (показываем только если пользователь аутентифицирован) */}
-      {isAuthenticated && user && <Header />}
+      {/* Хедер приложения (показываем только если пользователь аутентифицирован и нет ошибок) */}
+      {isAuthenticated && user && !error && <Header />}
       
       {/* Основное содержимое */}
       <main className="pt-4 pb-8">
@@ -102,11 +167,11 @@ function App() {
           <Route path="/admin-piisa-popa" element={<AdminLoginPage />} />
           <Route path="/404" element={<NotFoundPage />} />
           
-          {/* Страница для заполнения профиля */}
-          <Route 
+          {/* Страница для заполнения профиля - удалена, больше не нужна */}
+          {/* <Route 
             path="/complete-profile" 
-            element={isAuthenticated ? <CompleteProfilePage /> : <Navigate to="/login" />} 
-          />
+            element={isAuthenticated && !error ? <CompleteProfilePage /> : <Navigate to="/login" />} 
+          /> */}
 
           {/* Базовые защищенные роуты (требуют только аутентификации) */}
         <Route element={<ProtectedRoute />}>
@@ -135,8 +200,8 @@ function App() {
       </Routes>
       </main>
       
-      {/* Футер приложения (показываем только если пользователь аутентифицирован) */}
-      {isAuthenticated && user && (
+      {/* Футер приложения (показываем только если пользователь аутентифицирован и нет ошибок) */}
+      {isAuthenticated && user && !error && (
         <footer className="bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-gray-200 py-6 text-center text-gray-600 text-sm">
           <div className="container mx-auto">
             <p>© {new Date().getFullYear()} MedCare. Все права защищены.</p>
