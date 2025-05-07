@@ -68,7 +68,7 @@ cd medcare
 1. Создайте и активируйте виртуальное окружение:
 ```bash
 cd backend
-    python -m venv venv
+python -m venv venv
 source venv/bin/activate  # На Windows: venv\Scripts\activate
 ```
 
