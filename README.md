@@ -66,11 +66,11 @@ cd medcare
 
 #### Настройка бэкенда
 1. Создайте и активируйте виртуальное окружение:
-    ```bash
+```bash
 cd backend
     python -m venv venv
 source venv/bin/activate  # На Windows: venv\Scripts\activate
-    ```
+```
 
 2. Установите зависимости:
     ```bash
