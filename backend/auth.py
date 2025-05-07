@@ -1,5 +1,3 @@
-# backend/auth.py
-
 import os
 import requests  # Добавляем для HTTP-запросов к Google API
 import time # Добавляем для работы с временем и задержками
@@ -34,8 +32,6 @@ load_dotenv()
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "735617581412-e8ceb269bj7qqrv9sl066q63g5dr5sne.apps.googleusercontent.com")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "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")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/google/callback")
-
-# --- Настройки для JWT ---
 
 # Секретный ключ для подписи JWT. Считывается из переменной окружения SECRET_KEY.
 # Эту переменную нужно установить в вашем .env файле или в окружении сервера.
