@@ -202,12 +202,13 @@ export const notificationsApi = {
   getNotificationSettings: async () => {
     try {
       const response = await api.get('/users/me/notification-settings');
+      console.info('Настройки уведомлений получены:', response.data);
       return response.data;
     } catch (error) {
       console.error('Ошибка при получении настроек уведомлений:', error);
       // Возвращаем настройки по умолчанию, если произошла ошибка
+      console.warn('Возвращаем настройки уведомлений по умолчанию');
       return {
-        email_notifications: true,
         push_notifications: true,
         appointment_reminders: true
       };
@@ -217,11 +218,93 @@ export const notificationsApi = {
   // Обновление настроек уведомлений пользователя
   updateNotificationSettings: async (settings) => {
     try {
+      console.info('Отправка настроек уведомлений:', {
+        ...settings,
+        csrf_token: settings.csrf_token ? '[MASKED]' : 'missing'
+      });
+      
+      // Проверяем наличие CSRF токена
+      if (!settings.csrf_token) {
+        console.error('CSRF токен отсутствует в запросе на обновление настроек');
+        throw new Error('CSRF токен обязателен для обновления настроек');
+      }
+      
+      // Выполняем запрос
       const response = await api.put('/users/me/notification-settings', settings);
+      console.info('Настройки уведомлений успешно обновлены');
+      
       return response.data;
     } catch (error) {
       console.error('Ошибка при обновлении настроек уведомлений:', error);
+      
+      // Проверяем, можно ли повторить запрос
+      if (error.response && error.response.status === 403) {
+        console.warn('Получена ошибка CSRF. Попытка повторного получения токена и отправки...');
+        try {
+          // Получаем новый CSRF токен
+          const tokenResponse = await api.get('/csrf-token');
+          const freshToken = tokenResponse.data.csrf_token;
+          
+          // Повторяем запрос с новым токеном
+          console.info('Повторная отправка с новым CSRF токеном');
+          const retryResponse = await api.put('/users/me/notification-settings', {
+            ...settings,
+            csrf_token: freshToken
+          });
+          console.info('Настройки уведомлений успешно обновлены при повторной попытке');
+          return retryResponse.data;
+        } catch (retryError) {
+          console.error('Ошибка при повторной попытке обновления настроек:', retryError);
+          throw retryError;
+        }
+      }
+      
       throw error;
+    }
+  },
+  
+  // Функция для проверки и отладки статуса уведомлений
+  checkNotificationsStatus: async () => {
+    try {
+      // Проверяем настройки из sessionStorage
+      console.info('Проверка статуса уведомлений');
+      
+      let clientSettings = {
+        patient: null,
+        doctor: null
+      };
+      
+      try {
+        const patientSettings = sessionStorage.getItem('notificationSettings');
+        if (patientSettings) {
+          clientSettings.patient = JSON.parse(patientSettings);
+        }
+        
+        const doctorSettings = sessionStorage.getItem('doctorNotificationSettings');
+        if (doctorSettings) {
+          clientSettings.doctor = JSON.parse(doctorSettings);
+        }
+      } catch (e) {
+        console.error('Ошибка при чтении настроек из sessionStorage:', e);
+      }
+      
+      console.info('Локальные настройки уведомлений:', clientSettings);
+      
+      // Получаем настройки с сервера
+      const serverSettings = await api.get('/users/me/notification-settings');
+      console.info('Настройки уведомлений на сервере:', serverSettings.data);
+      
+      return {
+        clientSettings,
+        serverSettings: serverSettings.data,
+        mismatch: JSON.stringify(clientSettings) !== JSON.stringify(serverSettings.data)
+      };
+    } catch (error) {
+      console.error('Ошибка при проверке статуса уведомлений:', error);
+      return {
+        error: error.message,
+        status: 'error'
+      };
     }
   }
 };

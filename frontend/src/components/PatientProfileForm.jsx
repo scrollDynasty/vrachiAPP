@@ -114,7 +114,29 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          }
       };
       
-      fetchNotificationSettings();
+      // Сначала проверяем наличие сохраненных настроек в sessionStorage
+      try {
+         const savedSettings = sessionStorage.getItem('notificationSettings');
+         if (savedSettings) {
+            const parsedSettings = JSON.parse(savedSettings);
+            console.log('Загружены сохраненные настройки уведомлений:', parsedSettings);
+            
+            if (typeof parsedSettings.push_notifications === 'boolean') {
+               setPushNotifications(parsedSettings.push_notifications);
+            }
+            
+            if (typeof parsedSettings.appointment_reminders === 'boolean') {
+               setAppointmentReminders(parsedSettings.appointment_reminders);
+            }
+         } else {
+            // Если нет сохраненных настроек, загружаем с сервера
+            fetchNotificationSettings();
+         }
+      } catch (error) {
+         console.error('Ошибка при загрузке сохраненных настроек уведомлений:', error);
+         // При ошибке пробуем загрузить с сервера
+         fetchNotificationSettings();
+      }
    }, [profile]);
 
    // При монтировании компонента получаем CSRF токен
@@ -367,13 +389,22 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          // Получаем свежий CSRF-токен перед отправкой
          const freshTokenResponse = await api.get('/csrf-token');
          const freshToken = freshTokenResponse.data.csrf_token;
+         console.log('Получен свежий CSRF токен для настроек уведомлений');
+         
+         // Формируем объект с настройками и проверяем значения
+         const notificationSettings = {
+            csrf_token: freshToken,
+            push_notifications: !!pushNotifications, // Преобразуем в boolean
+            appointment_reminders: !!appointmentReminders // Преобразуем в boolean
+         };
+         
+         console.log('Сохранение настроек уведомлений:', {
+            push_notifications: notificationSettings.push_notifications,
+            appointment_reminders: notificationSettings.appointment_reminders
+         });
          
          // Отправляем запрос на обновление настроек с CSRF токеном
-         await notificationsApi.updateNotificationSettings({
-            csrf_token: freshToken,
-            push_notifications: pushNotifications,
-            appointment_reminders: appointmentReminders
-         });
+         await notificationsApi.updateNotificationSettings(notificationSettings);
          
          // Показываем уведомление об успешном сохранении
          toast.success('Настройки уведомлений сохранены', {
@@ -391,11 +422,29 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          // Получаем новый CSRF токен после успешной операции
          const newToken = await getCsrfToken();
          setCsrfToken(newToken);
+         
+         // Обновляем состояние приложения, чтобы отразить изменения
+         sessionStorage.setItem('notificationSettings', JSON.stringify({
+            push_notifications: notificationSettings.push_notifications,
+            appointment_reminders: notificationSettings.appointment_reminders
+         }));
       } catch (error) {
          console.error('Ошибка при сохранении настроек уведомлений:', error);
-         toast.error('Не удалось сохранить настройки. Попробуйте позже', {
+         
+         // Показываем детальное сообщение об ошибке
+         let errorMessage = 'Не удалось сохранить настройки. Попробуйте позже.';
+         
+         if (error.response && error.response.data) {
+            if (typeof error.response.data === 'string') {
+               errorMessage = `Ошибка: ${error.response.data}`;
+            } else if (error.response.data.detail) {
+               errorMessage = `Ошибка: ${error.response.data.detail}`;
+            }
+         }
+         
+         toast.error(errorMessage, {
             position: 'top-right',
-            autoClose: 3000
+            autoClose: 5000
          });
       } finally {
          setIsLoadingNotificationSettings(false);
