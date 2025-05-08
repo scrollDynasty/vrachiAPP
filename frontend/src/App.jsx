@@ -104,7 +104,8 @@ function App() {
     }
     
     // Если есть ожидающий подтверждения email и мы не на странице подтверждения - перенаправляем туда
-    if (pendingVerificationEmail && location.pathname !== '/verify-email') {
+    // ВАЖНО: Делаем это только если нет ошибки аутентификации
+    if (pendingVerificationEmail && !authError && location.pathname !== '/verify-email') {
       console.log("App: User has pending email verification, redirecting to verify-email page");
       navigate('/verify-email');
       return;

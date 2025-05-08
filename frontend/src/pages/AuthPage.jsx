@@ -129,6 +129,15 @@ function AuthPage() {
     } catch (error) {
       console.error('AuthPage: Login failed:', error);
       
+      // Логируем детали ошибки для отладки
+      console.error('AuthPage: Error details:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'No response'
+      });
+      
       // Проверяем, что состояние в authStore корректно сброшено
       if (useAuthStore.getState().isAuthenticated || useAuthStore.getState().user || useAuthStore.getState().token) {
         console.warn('AuthPage: Auth state not properly reset after login failure, forcing reset');
@@ -160,6 +169,30 @@ function AuthPage() {
 
       console.log('AuthPage: Registration result:', result);
 
+      // Проверяем результат регистрации
+      if (result && result.success === false) {
+        console.error('AuthPage: Registration failed with error:', result.error);
+        
+        // Дополнительно проверяем содержимое ошибки для лучшей диагностики
+        if (result.error && typeof result.error === 'string') {
+          if (result.error.toLowerCase().includes('email') && 
+              result.error.toLowerCase().includes('уже зарегистрирован')) {
+            console.warn('AuthPage: Email already registered error detected');
+            return result;
+          } else if (result.error.toLowerCase().includes('телефон') && 
+                     result.error.toLowerCase().includes('уже зарегистрирован')) {
+            console.warn('AuthPage: Phone number already registered error detected');
+            return result;
+          } else if (result.error.toLowerCase().includes('уже зарегистрирован')) {
+            console.warn('AuthPage: User already registered error detected');
+            return result;
+          }
+        }
+        
+        // Если регистрация не удалась - НЕ перенаправляем на страницу верификации
+        return result;
+      }
+
       // Проверяем, требуется ли подтверждение email
       if (result && result.requiresEmailVerification) {
         console.log('AuthPage: Registration successful, email verification required');
@@ -173,6 +206,15 @@ function AuthPage() {
       return result;
     } catch (error) {
       console.error('AuthPage: Registration failed:', error);
+      
+      // Дополнительно логируем подробности ошибки, если они доступны
+      if (error.response) {
+        console.error('AuthPage: Error response details:', {
+          status: error.response.status,
+          data: error.response.data,
+          detail: error.response.data?.detail
+        });
+      }
       
       // Проверяем, что состояние корректно сброшено
       if (useAuthStore.getState().isAuthenticated || useAuthStore.getState().user || useAuthStore.getState().token) {

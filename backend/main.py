@@ -47,7 +47,8 @@ from models import (
     Message,
     Review,
     UserNotificationSettings,
-)  # Добавляем UserNotificationSettings
+    PendingUser,
+)  # Добавляем PendingUser
 
 # Импортируем функции для работы с паролями и JWT, а также зависимости для аутентификации и ролей
 # get_current_user и require_role используются как зависимости в эндпоинтах
@@ -295,8 +296,8 @@ def register_user(
 ):
     """
     Регистрация нового пользователя (Пациента, Врача или Администратора).
-    Пользователь будет создан как неактивный и получит ссылку для подтверждения email.
-    Возвращает токен для автоматического входа.
+    Данные регистрации сохраняются во временной таблице pending_users.
+    Пользователь будет создан только после подтверждения email.
     """
     try:
         print(f"Received registration request for email: {user.email}, role: {user.role}")
@@ -317,8 +318,58 @@ def register_user(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Этот email уже зарегистрирован. Пожалуйста, войдите или используйте восстановление пароля.",
                 )
+        
+        # Проверяем, существует ли неподтвержденная регистрация с таким email
+        pending_user = db.query(PendingUser).filter(PendingUser.email == user.email).first()
+        if pending_user:
+            # Если есть неподтвержденная регистрация, и она не истекла, возвращаем ошибку
+            current_time = datetime.utcnow()
+            if pending_user.expires_at > current_time:
+                print(f"Pending registration found for {user.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Регистрация с этим email уже начата. Пожалуйста, подтвердите вашу почту или запросите повторную отправку письма."
+                )
+            else:
+                # Если регистрация истекла, удаляем ее
+                db.delete(pending_user)
+                db.commit()
+                print(f"Expired pending registration removed for {user.email}")
+        
+        # Проверяем, не занят ли телефон другим пользователем (если указан)
+        if user.contact_phone:
+            # Проверяем в таблице активных пользователей
+            existing_phone_profile = (
+                db.query(PatientProfile)
+                .filter(PatientProfile.contact_phone == user.contact_phone)
+                .first()
+            )
+            if existing_phone_profile:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот номер телефона уже зарегистрирован в системе."
+                )
+            
+            # Проверяем в таблице ожидающих подтверждения
+            existing_pending_with_phone = (
+                db.query(PendingUser)
+                .filter(PendingUser.contact_phone == user.contact_phone)
+                .first()
+            )
+            if existing_pending_with_phone:
+                # Проверяем, не истекла ли регистрация
+                current_time = datetime.utcnow()
+                if existing_pending_with_phone.expires_at > current_time:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Этот номер телефона уже используется в другой регистрации."
+                    )
+                else:
+                    # Если регистрация истекла, удаляем ее
+                    db.delete(existing_pending_with_phone)
+                    db.commit()
 
-        # Хешируем пароль перед сохранением в базе данных. НИКОГДА не храните пароли в открытом виде!
+        # Хешируем пароль перед сохранением в базе данных
         hashed_password = get_password_hash(user.password)
 
         # Проверяем сложность пароля
@@ -336,75 +387,55 @@ def register_user(
             user.role = "patient"
             print(f"Defaulting to patient role for {user.email}")
 
-        # Генерируем уникальный токен подтверждения email (используем UUID - Universally Unique Identifier)
+        # Генерируем уникальный токен подтверждения email
         verification_token = str(uuid.uuid4())
-        # Сохраняем метку времени создания токена (для проверки срока действия)
-        token_created_at = datetime.utcnow()
-
-        print(f"Creating new user: {user.email} with role: {user.role}")
         
-        # Создаем новый объект пользователя SQLAlchemy на основе данных из запроса и сгенерированных полей
-        new_user = User(
+        # Вычисляем время истечения токена (24 часа)
+        token_created_at = datetime.utcnow()
+        token_expires_at = token_created_at + timedelta(hours=24)
+
+        # Получаем данные для сохранения в PendingUser
+        try:
+            # В новых версиях Pydantic используется model_dump() вместо dict()
+            user_data = user.model_dump()
+        except AttributeError:
+            # Для обратной совместимости со старыми версиями
+            user_data = user.dict()
+        
+        # Создаем запись в таблице неподтвержденных пользователей
+        new_pending_user = PendingUser(
             email=user.email,
             hashed_password=hashed_password,
-            is_active=False,  # <--- Новый пользователь создается как НЕАКТИВНЫЙ
             role=user.role,
-            auth_provider="email",  # Явно указываем, что пользователь зарегистрирован через email
-            email_verification_token=verification_token,  # Сохраняем токен подтверждения в БД
-            email_verification_token_created_at=token_created_at,  # Сохраняем время создания токена в БД
+            full_name=user_data.get("full_name", None),
+            contact_phone=user_data.get("contact_phone", None),
+            district=user_data.get("district", None),
+            contact_address=user_data.get("contact_address", None),
+            medical_info=user_data.get("medical_info", None),
+            verification_token=verification_token,
+            expires_at=token_expires_at
         )
-
-        # Добавляем нового пользователя в сессию базы данных и сохраняем изменения (commit)
-        db.add(new_user)
+        
+        db.add(new_pending_user)
         db.commit()
-        # Обновляем объект new_user, чтобы получить сгенерированный базой данных id и другие актуальные поля
-        db.refresh(new_user)
-
-        print(f"User {user.email} created with ID: {new_user.id} and role: {new_user.role}")
+        db.refresh(new_pending_user)
         
-        # Создаем профиль пациента при регистрации, если передана информация о профиле
-        if user.role == "patient":
-            # Получаем данные профиля из запроса
-            try:
-                # В новых версиях Pydantic используется model_dump() вместо dict()
-                user_data = user.model_dump()
-            except AttributeError:
-                # Для обратной совместимости со старыми версиями
-                user_data = user.dict()
-                
-            full_name = user_data.get("full_name", None)
-            contact_phone = user_data.get("contact_phone", None)
-            district = user_data.get("district", None)
-            
-            # Если есть данные для профиля, создаем его
-            if full_name or contact_phone or district:
-                print(f"Creating patient profile for user {new_user.id}")
-                patient_profile = PatientProfile(
-                    user_id=new_user.id,
-                    full_name=full_name,
-                    contact_phone=contact_phone,
-                    district=district
-                )
-                db.add(patient_profile)
-                db.commit()
-                print(f"Patient profile created for user {new_user.id}")
+        print(f"Pending registration created for {user.email} with role: {user.role}")
         
-        # Отправляем письмо с подтверждением email в фоновом режиме.
-        # BackgroundTasks позволяют выполнить функцию асинхронно, не блокируя ответ на запрос регистрации.
-        print(f"Adding background task to send verification email to {new_user.email}")
+        # Отправляем письмо с подтверждением email в фоновом режиме
+        print(f"Adding background task to send verification email to {user.email}")
         background_tasks.add_task(
-            send_verification_email, new_user.email, verification_token
-        )
-
-        # Создаем и возвращаем JWT токен для автоматического входа
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": new_user.email, "role": new_user.role},
-            expires_delta=access_token_expires,
+            send_verification_email, user.email, verification_token
         )
         
-        print(f"Registration successful for {user.email} with role: {new_user.role}")
-        return {"access_token": access_token, "token_type": "bearer"}
+        # Возвращаем ответ с информацией о необходимости подтверждения email
+        # В этом случае мы не возвращаем токен доступа, так как пользователь еще не создан
+        print(f"Registration process started for {user.email}, email verification required")
+        return {
+            "access_token": "",  # Пустой токен, так как пользователь еще не создан
+            "token_type": "bearer",
+            "email_verification_required": True  # Флаг для фронтенда
+        }
         
     except ValidationError as e:
         print(f"Validation error during registration: {str(e)}")
@@ -526,65 +557,106 @@ def verify_email(
 ):  # Принимает токен как параметр запроса (?token=...)
     """
     Подтверждение email по токену из письма.
-    Активирует пользователя, если токен валиден и не просрочен.
+    Создает пользователя из данных в таблице pending_users.
     Возвращает JWT токен для автоматического входа.
     """
-    # Настройки времени жизни токена подтверждения email (например, 24 часа)
-    # TODO: Вынести это в настройки или переменные окружения
-    VERIFICATION_TOKEN_EXPIRE_HOURS = 24
-
     # Ищем пользователя в базе данных по предоставленному токену подтверждения email
-    user = db.query(User).filter(User.email_verification_token == token).first()
+    pending_user = db.query(PendingUser).filter(PendingUser.verification_token == token).first()
 
-    if user is None:
-        # Проверяем, возможно пользователь уже подтвердил email (токен был использован)
-        # Ищем пользователей с is_active=True и отсутствующим токеном
-        active_users = (
-            db.query(User)
-            .filter(User.is_active == True, User.email_verification_token.is_(None))
-            .all()
-        )
-
-        # Если есть активные пользователи, возможно один из них использовал данный токен
-        if active_users:
+    if pending_user is None:
+        # Проверяем, возможно пользователь уже подтвердил email
+        # Токен мог быть уже использован, проверяем по email
+        existing_user = db.query(User).filter(User.email == pending_user.email).first() if pending_user else None
+        
+        if existing_user and existing_user.is_active:
+            # Если пользователь уже существует и активен, значит email уже подтвержден
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid verification token. Email may have already been verified.",
+                detail="Email уже подтвержден. Вы можете войти в систему."
             )
         else:
-            # Если токен не найден в базе данных и нет активных пользователей, он недействителен.
+            # Если токен не найден в базе данных
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,  # 400 Bad Request - некорректный запрос/токен
-                detail="Invalid verification token",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Недействительный токен подтверждения или время его действия истекло."
             )
 
-    # Проверяем, не истек ли срок действия токена.
-    # Сравниваем текущее время (UTC) с временем создания токена.
-    token_lifetime = datetime.utcnow() - user.email_verification_token_created_at
-    if token_lifetime > timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS):
-        # Если разница во времени превышает установленный срок жизни токена.
+    # Проверяем, не истек ли срок действия токена
+    current_time = datetime.utcnow()
+    if current_time > pending_user.expires_at:
+        # Удаляем просроченную запись
+        db.delete(pending_user)
+        db.commit()
+        
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,  # 400 Bad Request - просроченный токен
-            detail="Verification token expired",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Срок действия токена истек. Пожалуйста, запросите повторную отправку письма для подтверждения."
         )
 
-    # Если токен найден, не просрочен и связан с существующим пользователем, активируем пользователя.
-    user.is_active = True
-    # Очищаем поля токена после использования для безопасности (токен становится одноразовым).
-    user.email_verification_token = None
-    user.email_verification_token_created_at = None
+    # Проверяем, не существует ли уже пользователь с таким email
+    existing_user = db.query(User).filter(User.email == pending_user.email).first()
+    if existing_user:
+        # Если пользователь уже существует, удаляем pending_user
+        db.delete(pending_user)
+        db.commit()
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пользователь с таким email уже существует."
+        )
 
-    # Сохраняем изменения в базе данных
+    # Создаем нового пользователя на основе данных из pending_user
+    new_user = User(
+        email=pending_user.email,
+        hashed_password=pending_user.hashed_password,
+        is_active=True,  # Пользователь сразу активный, т.к. email подтвержден
+        role=pending_user.role,
+        auth_provider="email"
+    )
+
+    db.add(new_user)
     db.commit()
-    db.refresh(
-        user
-    )  # Обновляем объект пользователя, чтобы убедиться, что изменения сохранены
+    db.refresh(new_user)
+    
+    print(f"User {new_user.email} created with ID: {new_user.id} and role: {new_user.role}")
+
+    # Если это пациент, создаем профиль пациента
+    if pending_user.role == "patient":
+        # Проверяем, есть ли данные для профиля
+        has_profile_data = any([
+            pending_user.full_name,
+            pending_user.contact_phone,
+            pending_user.district,
+            pending_user.contact_address,
+            pending_user.medical_info
+        ])
+        
+        if has_profile_data:
+            print(f"Creating patient profile for user {new_user.id}")
+            patient_profile = PatientProfile(
+                user_id=new_user.id,
+                full_name=pending_user.full_name,
+                contact_phone=pending_user.contact_phone,
+                district=pending_user.district,
+                contact_address=pending_user.contact_address,
+                medical_info=pending_user.medical_info
+            )
+            db.add(patient_profile)
+            db.commit()
+            print(f"Patient profile created for user {new_user.id}")
+
+    # Удаляем запись из таблицы pending_users
+    db.delete(pending_user)
+    db.commit()
 
     # Создаем и возвращаем JWT токен для автоматического входа
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "role": user.role}, expires_delta=access_token_expires
+        data={"sub": new_user.email, "role": new_user.role},
+        expires_delta=access_token_expires
     )
+    
+    print(f"Email verification successful for {new_user.email}")
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -1680,7 +1752,8 @@ def resend_verification_email(
 ):
     """
     Повторная отправка письма с подтверждением email.
-    Генерирует новый токен и отправляет новое письмо с ссылкой активации.
+    Проверяет наличие неподтвержденной регистрации в таблице pending_users,
+    генерирует новый токен и отправляет новое письмо с ссылкой активации.
 
     Args:
         email_data (dict): Словарь с email пользователя.
@@ -1700,35 +1773,36 @@ def resend_verification_email(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Email не указан"
             )
 
-        # Ищем пользователя в базе данных
+        # Ищем существующего активного пользователя
         user = db.query(User).filter(User.email == email).first()
-        if not user:
-            print(f"User with email {email} not found")
-            # Для безопасности не сообщаем, что пользователя не существует
+        if user and user.is_active:
+            print(f"User {email} is already active")
+            return {"message": "Ваш email уже подтвержден. Вы можете войти в систему."}
+        
+        # Ищем pending_user в базе данных
+        pending_user = db.query(PendingUser).filter(PendingUser.email == email).first()
+        if not pending_user:
+            print(f"No pending registration found for {email}")
+            # Для безопасности не сообщаем, что регистрация не начата
             return {
                 "message": "Если этот email зарегистрирован в системе, на него будет отправлено письмо с инструкциями."
             }
-
-        # Если пользователь уже активирован, сообщаем об этом
-        if user.is_active:
-            print(f"User {email} is already active")
-            return {"message": "Ваш email уже подтвержден. Вы можете войти в систему."}
 
         print(f"Generating new verification token for {email}")
         
         # Генерируем новый токен для подтверждения email
         verification_token = secrets.token_urlsafe(32)
-        token_created_at = datetime.utcnow()
+        token_expires_at = datetime.utcnow() + timedelta(hours=24)
 
         # Обновляем токен в базе данных
-        user.email_verification_token = verification_token
-        user.email_verification_token_created_at = token_created_at
+        pending_user.verification_token = verification_token
+        pending_user.expires_at = token_expires_at
         db.commit()
 
         print(f"Token updated in database for {email}")
         
         # Отправляем письмо с подтверждением email в фоновом режиме
-        background_tasks.add_task(send_verification_email, user.email, verification_token)
+        background_tasks.add_task(send_verification_email, email, verification_token)
         
         print(f"Background task added to send verification email to {email}")
 

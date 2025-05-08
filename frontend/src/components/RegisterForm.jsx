@@ -1,19 +1,24 @@
 // frontend/src/components/RegisterForm.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Spinner, Checkbox, Card, CardHeader, CardBody, Input, Select, SelectItem, Divider, Radio, RadioGroup } from '@nextui-org/react';
+import { Button, Spinner, Checkbox, Card, CardHeader, CardBody, Input, Select, SelectItem, Divider, Radio, RadioGroup, Textarea } from '@nextui-org/react';
 import api from '../api'; // Импортируем API для получения списка районов
+import { useNavigate } from 'react-router-dom';
 
 function RegisterForm({ onSubmit, isLoading, error }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
   const [userType, setUserType] = useState('patient'); // Только пациент
   const [formError, setFormError] = useState(null);
   const [districts, setDistricts] = useState([]);
   const [district, setDistrict] = useState('');
   const [fullName, setFullName] = useState(''); // ФИО
   const [phone, setPhone] = useState(''); // Номер телефона
+  const [address, setAddress] = useState(''); // Адрес
+  const [medicalInfo, setMedicalInfo] = useState(''); // Медицинская информация
   const [agreeTos, setAgreeTos] = useState(false);
+  const navigate = useNavigate();
 
   // Загрузка списка районов при монтировании компонента
   useEffect(() => {
@@ -29,16 +34,27 @@ function RegisterForm({ onSubmit, isLoading, error }) {
     fetchDistricts();
   }, []);
 
+  // Проверяем совпадение паролей при изменении любого из них
+  useEffect(() => {
+    if (password && confirmPassword) {
+      setPasswordMismatch(password !== confirmPassword);
+    } else {
+      setPasswordMismatch(false);
+    }
+  }, [password, confirmPassword]);
+
   // Валидация формы
   const validateForm = () => {
     // Базовая валидация полей
     if (!email) return "Пожалуйста, введите email";
     if (!password) return "Пожалуйста, введите пароль";
     if (password !== confirmPassword) return "Пароли не совпадают";
+    if (passwordMismatch) return "Пароли не совпадают";
     if (password.length < 8) return "Пароль должен содержать минимум 8 символов";
     if (!fullName) return "Пожалуйста, введите ваше ФИО";
     if (!phone) return "Пожалуйста, введите номер телефона";
     if (!district) return "Пожалуйста, выберите район проживания";
+    if (!address) return "Пожалуйста, введите ваш адрес";
     if (!agreeTos) return "Вы должны согласиться с условиями использования";
     
     // Email валидация
@@ -54,6 +70,16 @@ function RegisterForm({ onSubmit, isLoading, error }) {
     }
     
     return null;
+  };
+
+  // Функция для обновления состояния пароля с проверкой совпадения
+  const handlePasswordChange = (e) => {
+    setPassword(e.target.value);
+  };
+
+  // Функция для обновления состояния подтверждения пароля с проверкой совпадения
+  const handleConfirmPasswordChange = (e) => {
+    setConfirmPassword(e.target.value);
   };
 
   // Обработчик отправки формы
@@ -78,30 +104,83 @@ function RegisterForm({ onSubmit, isLoading, error }) {
         role: "patient", // Всегда роль пациента
         district: district,
         full_name: fullName.trim(),
-        contact_phone: phone.trim()
+        contact_phone: phone.trim(),
+        contact_address: address.trim(),
+        medical_info: medicalInfo.trim()
       };
       
+      console.log("RegisterForm: Sending registration data", { 
+        email: userData.email,
+        role: userData.role,
+        hasPassword: !!userData.password,
+        district: userData.district
+      });
+      
       // Вызываем функцию onSubmit из родительского компонента
-      await onSubmit(userData);
+      const result = await onSubmit(userData);
+      
+      console.log("RegisterForm: Registration result", result);
+      
+      // Проверяем результат на явный признак неудачной регистрации
+      if (result && result.success === false) {
+        console.error('Registration failed with explicit failure:', result.error);
+        setFormError(result.error || "Ошибка при регистрации. Пожалуйста, попробуйте позже.");
+        // Так как ошибка уже обработана, не пробрасываем её дальше
+        return;
+      }
       
     } catch (error) {
       console.error('Registration error:', error);
       
+      // Если есть оригинальное сообщение об ошибке в error.message, используем его
+      const errorMessage = error.message || "Ошибка при регистрации";
+      console.log("Original error message:", errorMessage);
+      
       // Обработка ошибок
       if (error.response) {
         const status = error.response.status;
-        const detail = error.response.data?.detail;
+        let detail = error.response.data?.detail || '';
         
-        if (status === 400 && detail?.includes('уже зарегистрирован')) {
-          setFormError("Этот email уже зарегистрирован. Пожалуйста, используйте другой email или выполните вход.");
-        } else if (detail) {
-          setFormError(detail);
+        // Выводим подробную информацию для отладки
+        console.log("RegisterForm: Error details:", {
+          status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          detail: error.response.data?.detail
+        });
+        
+        // Если есть детали ошибки в ответе, используем их
+        if (detail) {
+          console.log("Registration error detail from server:", detail);
+          
+          // Проверяем разные типы ошибок по сообщению
+          if (detail.toLowerCase().includes('email') && detail.toLowerCase().includes('уже зарегистрирован')) {
+            setFormError("Этот email уже зарегистрирован. Пожалуйста, используйте другой email или выполните вход.");
+          } else if (detail.toLowerCase().includes('телефон') && detail.toLowerCase().includes('уже зарегистрирован')) {
+            setFormError("Этот номер телефона уже зарегистрирован. Пожалуйста, используйте другой номер или выполните вход.");
+          } else if (detail.toLowerCase().includes('уже зарегистрирован')) {
+            setFormError("Этот пользователь уже зарегистрирован. Пожалуйста, используйте другие данные или выполните вход.");
+          } else if (detail.toLowerCase().includes('already registered')) {
+            setFormError("Этот пользователь уже зарегистрирован. Пожалуйста, используйте другие данные или выполните вход.");
+          } else {
+            // Показываем оригинальное сообщение от сервера
+            setFormError(detail);
+          }
         } else {
-          setFormError("Ошибка регистрации. Пожалуйста, попробуйте позже.");
+          // Если нет деталей, используем статус для формирования сообщения
+          if (status === 400) {
+            setFormError("Ошибка в данных регистрации. Пожалуйста, проверьте все поля.");
+          } else if (status === 409) {
+            setFormError("Пользователь с такими данными уже существует.");
+          } else {
+            setFormError("Ошибка регистрации: " + errorMessage);
+          }
         }
-      } else if (error.message) {
-        setFormError(error.message);
+      } else if (errorMessage) {
+        // Если нет ответа, но есть сообщение об ошибке, показываем его
+        setFormError(errorMessage);
       } else {
+        // Общее сообщение, если ничего другого не подходит
         setFormError("Произошла ошибка при регистрации. Пожалуйста, попробуйте позже.");
       }
     }
@@ -175,6 +254,23 @@ function RegisterForm({ onSubmit, isLoading, error }) {
                   </svg>
                 }
               />
+              
+              <Input
+                type="text"
+                label="Адрес"
+                placeholder="Введите ваш адрес"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                variant="bordered"
+                radius="sm"
+                fullWidth
+                isRequired
+                startContent={
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
+                }
+              />
             </div>
             
             <Divider />
@@ -215,6 +311,24 @@ function RegisterForm({ onSubmit, isLoading, error }) {
             <Divider />
             
             <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Медицинская информация</h3>
+              
+              <Textarea
+                label="Медицинская информация"
+                placeholder="Введите информацию о вашем здоровье, хронических заболеваниях, аллергиях и т.д."
+                value={medicalInfo}
+                onChange={(e) => setMedicalInfo(e.target.value)}
+                variant="bordered"
+                radius="sm"
+                fullWidth
+                minRows={3}
+                maxRows={5}
+              />
+            </div>
+            
+            <Divider />
+            
+            <div className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-800 mb-2">Учётные данные</h3>
               
               <Input
@@ -240,11 +354,14 @@ function RegisterForm({ onSubmit, isLoading, error }) {
                   label="Пароль"
                   placeholder="Введите пароль"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={handlePasswordChange}
                   variant="bordered"
                   radius="sm"
                   fullWidth
                   isRequired
+                  isInvalid={passwordMismatch}
+                  color={passwordMismatch ? "danger" : "default"}
+                  errorMessage={passwordMismatch ? "Пароли не совпадают" : ""}
                   startContent={
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -257,11 +374,14 @@ function RegisterForm({ onSubmit, isLoading, error }) {
                   label="Подтверждение пароля"
                   placeholder="Повторите пароль"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={handleConfirmPasswordChange}
                   variant="bordered"
                   radius="sm"
                   fullWidth
                   isRequired
+                  isInvalid={passwordMismatch}
+                  color={passwordMismatch ? "danger" : "default"}
+                  errorMessage={passwordMismatch ? "Пароли не совпадают" : ""}
                   startContent={
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -270,8 +390,6 @@ function RegisterForm({ onSubmit, isLoading, error }) {
                 />
               </div>
             </div>
-            
-            <Divider />
             
             <div className="space-y-4">
               <Checkbox
@@ -297,9 +415,12 @@ function RegisterForm({ onSubmit, isLoading, error }) {
               <div className="text-center mt-4">
                 <p className="text-gray-600">
                   Уже есть аккаунт?{' '}
-                  <a href="/login" className="text-primary-600 hover:underline font-medium">
+                  <button 
+                    onClick={() => navigate('/login')}
+                    className="text-primary-600 hover:underline font-medium"
+                  >
                     Войти
-                  </a>
+                  </button>
                 </p>
               </div>
             </div>

@@ -77,26 +77,12 @@ function LoginForm({ onSubmit, isLoading, error }) {
     } catch (error) {
       console.error("LoginForm: Login failed", error);
       
-      // Обрабатываем разные типы ошибок
-      if (error.response) {
-        // Ошибка с ответом от сервера
-        const status = error.response.status;
-        const detail = error.response.data?.detail;
-        
-        if (status === 401) {
-          setFormError("Неверный логин или пароль. Пожалуйста, проверьте введенные данные.");
-        } else if (status === 403 && detail?.includes('подтвердите')) {
-          setFormError("Пожалуйста, подтвердите ваш email перед входом.");
-        } else if (status === 429) {
-          setFormError("Слишком много попыток входа. Пожалуйста, попробуйте позже.");
-        } else {
-          setFormError(detail || "Ошибка входа. Пожалуйста, попробуйте позже.");
-        }
-      } else if (error.message) {
-        // Ошибка с сообщением (например, из authStore)
+      // Свойство message должно содержать текст ошибки из authStore
+      if (error && typeof error === 'object' && error.message) {
         setFormError(error.message);
+      } else if (typeof error === 'string') {
+        setFormError(error);
       } else {
-        // Общая ошибка
         setFormError("Произошла ошибка при попытке входа. Пожалуйста, попробуйте позже.");
       }
     }

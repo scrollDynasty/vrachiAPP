@@ -17,6 +17,8 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     contact_phone: Optional[str] = None
     district: Optional[str] = None
+    contact_address: Optional[str] = None
+    medical_info: Optional[str] = None
 
 
 # Модель для данных, возвращаемых после регистрации и при получении информации о пользователе (включая is_active)

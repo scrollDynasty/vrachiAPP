@@ -40,23 +40,30 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True) # Первичный ключ, автоинкремент
     email = Column(String(255), unique=True, index=True, nullable=False) # Email, уникальный, индексированный, обязательный
     hashed_password = Column(String(255), nullable=False) # Хэш пароля
-    is_active = Column(Boolean, default=False) # <--- ИЗМЕНЕНО: Пользователь неактивен по умолчанию после регистрации
-    role = Column(String(50), nullable=False) # Роль пользователя ('patient', 'doctor', 'admin')
-    auth_provider = Column(String(50), default="email") # Провайдер аутентификации ('email', 'google')
-
-    # Поля для подтверждения email
-    email_verification_token = Column(String(255), unique=True, nullable=True) # Токен подтверждения email (может быть NULL)
-    email_verification_token_created_at = Column(DateTime, nullable=True) # Время создания токена (может быть NULL)
-
+    
+    # Роль пользователя: patient (пациент), doctor (врач), admin (администратор)
+    role = Column(String(50), nullable=False, default="patient")
+    
+    # Активен ли пользователь (например, после подтверждения email)
+    is_active = Column(Boolean, default=True)
+    
+    # Время создания аккаунта
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Время последнего обновления
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # OAuth провайдер (google, facebook, null для обычной регистрации)
+    auth_provider = Column(String(50), nullable=True)
+    # Идентификатор пользователя в системе провайдера
+    auth_provider_id = Column(String(255), nullable=True)
+    
     # Поле для аватарки пользователя
     avatar_path = Column(String(255), nullable=True)  # Путь к файлу аватарки
-
-    # Отношения к профилям (один пользователь может иметь ОДИН профиль пациента или ОДИН профиль врача)
-    # uselist=False указывает на отношение "один к одному"
-    # ondelete="CASCADE" означает, что если пользователь удаляется, связанный профиль удаляется автоматически
-    patient_profile = relationship("PatientProfile", back_populates="user", uselist=False)
-    doctor_profile = relationship("DoctorProfile", back_populates="user", uselist=False)
-
+    
+    # Отношения с другими таблицами
+    patient_profile = relationship("PatientProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    doctor_profile = relationship("DoctorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    
     # Отношение к заявкам на роль врача
     doctor_applications = relationship("DoctorApplication", back_populates="user")
     
@@ -154,7 +161,7 @@ class UserNotificationSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Отношение к пользователю
-    user = relationship("User", backref="notification_settings")
+    user = relationship("User", backref="notification_settings_rel")
 
 
 # Модель для хранения информации о просмотренных уведомлениях
@@ -235,6 +242,29 @@ class Review(Base):
     
     # Отношения
     consultation = relationship("Consultation", back_populates="review")
+
+
+# Модель для хранения данных неподтвержденных пользователей
+class PendingUser(Base):
+    __tablename__ = "pending_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(50), nullable=False, default="patient")
+    
+    # Данные профиля
+    full_name = Column(String(255), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    district = Column(String(255), nullable=True)
+    contact_address = Column(String(255), nullable=True)
+    medical_info = Column(Text, nullable=True)
+    
+    # Токен для подтверждения
+    verification_token = Column(String(255), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Время жизни токена - 24 часа
+    expires_at = Column(DateTime, nullable=False)
 
 
 # TODO: Определить модели для других сущностей:

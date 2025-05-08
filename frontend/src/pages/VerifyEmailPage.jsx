@@ -20,7 +20,7 @@ const VerifyEmailPage = () => {
   const [resendError, setResendError] = useState('');
   const [redirectCountdown, setRedirectCountdown] = useState(5);
   const navigate = useNavigate();
-  const { isAuthenticated, user, login, setUser, setAuthenticated } = useAuthStore();
+  const { login, initializeAuth, pendingVerificationEmail } = useAuthStore();
 
   // Проверка наличия токена и данных профиля
   useEffect(() => {
@@ -42,14 +42,43 @@ const VerifyEmailPage = () => {
       }
     }
 
-    if (!token) {
+    // Если у нас нет токена в URL, но есть pendingVerificationEmail из store
+    if (!token && pendingVerificationEmail) {
+      console.log('VerifyEmailPage: No token in URL but pendingVerificationEmail exists:', pendingVerificationEmail);
       setStatus('no_token');
-      setError('Токен подтверждения отсутствует в URL');
+      setResendEmail(pendingVerificationEmail);
+      setError('Для подтверждения email необходимо перейти по ссылке из письма');
+      return;
+    }
+    
+    // Если нет ни токена в URL, ни ожидающего подтверждения email
+    if (!token && !pendingVerificationEmail) {
+      console.log('VerifyEmailPage: No token and no pendingVerificationEmail. Redirecting...');
+      setStatus('no_token');
+      setError('Токен подтверждения отсутствует в URL. Если вы только что зарегистрировались, проверьте вашу почту.');
+      
+      // Если мы здесь, скорее всего, пользователь перешел на страницу напрямую
+      // Перенаправим его на страницу логина через короткий промежуток времени
+      setTimeout(() => {
+        navigate('/login');
+      }, 5000);
+      
       return;
     }
 
     // Функция для проверки токена
     const verifyToken = async () => {
+      // Проверяем, был ли уже этот токен обработан (чтобы избежать повторных запросов)
+      const processedToken = localStorage.getItem('processedVerificationToken');
+      if (processedToken === token) {
+        console.log('Токен уже был обработан ранее');
+        setStatus('success');
+        
+        // Начинаем обратный отсчет для редиректа
+        startRedirectCountdown();
+        return;
+      }
+      
       try {
         // Если верификация уже выполнялась, не повторяем
         if (verificationAttempted) return;
@@ -60,74 +89,69 @@ const VerifyEmailPage = () => {
         if (response.status === 200) {
           setStatus('success');
           
+          // Сохраняем токен как обработанный
+          localStorage.setItem('processedVerificationToken', token);
+          
           // Сохраняем полученный токен и устанавливаем в API
           const { access_token } = response.data;
           if (access_token) {
-            localStorage.setItem('token', access_token);
+            localStorage.setItem('accessToken', access_token);
             api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
             
-            // Получаем данные пользователя
-            try {
-              const userResponse = await api.get('/users/me');
-              // Обновляем стор с данными пользователя
-              setUser(userResponse.data);
-              setAuthenticated(true);
-              
-              // Показываем уведомление об успешном подтверждении
-              toast.success('Email успешно подтвержден! Переходим в ваш профиль.', {
-                autoClose: 3000
-              });
-              
-              // Сразу перенаправляем на страницу профиля без таймера
-              navigate('/profile');
-              
-              // Очищаем данные о токене верификации, так как он больше не нужен
-              localStorage.removeItem('emailVerificationToken');
-              localStorage.removeItem('emailVerificationStartTime');
-              
-              return;
-            } catch (err) {
-              console.error('Error fetching user data after email verification:', err);
-            }
+            // Инициализируем состояние авторизации
+            await initializeAuth();
+            
+            // Показываем уведомление об успешном подтверждении
+            toast.success('Email успешно подтвержден! Переходим в ваш профиль через 5 секунд.', {
+              autoClose: 3000
+            });
+            
+            // Начинаем обратный отсчет для редиректа
+            startRedirectCountdown();
           }
-          
-          // Очищаем данные о токене верификации, так как он больше не нужен
-          localStorage.removeItem('emailVerificationToken');
-          localStorage.removeItem('emailVerificationStartTime');
         }
       } catch (err) {
+        console.error('Ошибка при верификации email:', err);
+        
         // Если верификация не удалась, проверяем причину
         if (err.response && err.response.status === 400) {
-          if (err.response.data.detail.includes('expired')) {
+          const errorDetail = err.response.data.detail || '';
+          console.log('Детали ошибки верификации:', errorDetail);
+          
+          if (errorDetail.includes('expired')) {
             setStatus('expired');
-          } else if (err.response.data.detail.includes('Invalid verification token')) {
+          } else if (errorDetail.includes('Invalid verification token') || 
+                     errorDetail.includes('already been verified')) {
             // Токен уже был использован или недействительный
             setStatus('already_verified');
             
-            // Проверяем, авторизован ли пользователь
-            if (!isAuthenticated) {
-              // Если нет, показываем сообщение о необходимости входа
-              toast.info('Токен уже подтвержден. Пожалуйста, войдите в систему.', {
-                autoClose: 5000
-              });
-              
-              // Через 3 секунды перенаправляем на страницу входа
-              setTimeout(() => {
-                navigate('/login');
-              }, 3000);
-            } else {
-              // Если уже авторизован, перенаправляем на главную страницу
-              toast.info('Вы уже подтвердили email и авторизованы в системе', {
-                autoClose: 3000
-              });
-              
-              setTimeout(() => {
-                navigate('/');
-              }, 2000);
-            }
+            // Показываем сообщение о необходимости входа
+            toast.info('Токен уже подтвержден. Пожалуйста, войдите в систему.', {
+              autoClose: 5000
+            });
+            
+            // Через 3 секунды перенаправляем на страницу входа
+            setTimeout(() => {
+              navigate('/login');
+            }, 3000);
+          } else if (errorDetail.includes('already registered') || 
+                     errorDetail.includes('уже зарегистрирован')) {
+            // Email уже зарегистрирован
+            setStatus('already_registered');
+            setError(errorDetail);
+            
+            // Показываем сообщение о том, что email уже зарегистрирован
+            toast.warning('Этот email уже зарегистрирован. Пожалуйста, войдите в систему.', {
+              autoClose: 5000
+            });
+            
+            // Через 3 секунды перенаправляем на страницу входа
+            setTimeout(() => {
+              navigate('/login');
+            }, 3000);
           } else {
             setStatus('error');
-            setError(err.response.data.detail || 'Ошибка подтверждения email');
+            setError(errorDetail || 'Ошибка подтверждения email');
           }
         } else {
           setStatus('error');
@@ -136,90 +160,87 @@ const VerifyEmailPage = () => {
       }
     };
 
-    // Проверяем, есть ли уже сохраненный токен
-    const savedToken = localStorage.getItem('emailVerificationToken');
-    const startTime = localStorage.getItem('emailVerificationStartTime');
-    
-    if (savedToken === token) {
-      // Если прошло более 24 часов с начала верификации, считаем токен просроченным
-      const now = Date.now();
-      const hoursElapsed = (now - parseInt(startTime || '0')) / (1000 * 60 * 60);
+    // Функция для начала обратного отсчета до редиректа
+    const startRedirectCountdown = () => {
+      let count = 5;
+      setRedirectCountdown(count);
       
-      if (hoursElapsed > 24) {
-        setStatus('expired');
-        return;
-      }
-      
-      // Токен уже в процессе верификации, показываем экран успеха
-      setStatus('success');
-    } else {
-      // Первая попытка верификации
+      const interval = setInterval(() => {
+        count--;
+        setRedirectCountdown(count);
+        
+        if (count <= 0) {
+          clearInterval(interval);
+          // Перенаправляем на профиль
+          navigate('/profile');
+        }
+      }, 1000);
+    };
+
+    // Запускаем верификацию токена только если он есть
+    if (token) {
       verifyToken();
     }
-  }, [token, isAuthenticated, verificationAttempted, navigate, setUser, setAuthenticated]);
+  }, [token, verificationAttempted, navigate, initializeAuth, pendingVerificationEmail]);
 
   // Функция для перехода на страницу входа
   const goToLogin = () => {
-    // Очищаем сохраненные данные верификации
-    localStorage.removeItem('emailVerificationToken');
-    localStorage.removeItem('emailVerificationStartTime');
     navigate('/login');
   };
 
   // Функция для запроса новой ссылки подтверждения email
   const resendVerificationEmail = async () => {
-    if (isAuthenticated && user) {
-      setIsResendingEmail(true);
-      try {
-        const response = await api.post('/resend-verification', { email: user.email });
-        if (response.status === 200) {
-          setResendSuccess(true);
-          toast.success('Новая ссылка для подтверждения отправлена на вашу почту', {
-            autoClose: 5000
-          });
-          setTimeout(() => {
-            setResendSuccess(false);
-          }, 5000);
-        }
-      } catch (error) {
-        console.error('Ошибка при запросе новой ссылки подтверждения:', error);
-        setError('Не удалось отправить новую ссылку. Пожалуйста, попробуйте позже.');
-        toast.error('Не удалось отправить новую ссылку. Попробуйте позже.', {
+    // Для неавторизованных пользователей запрашиваем email
+    setResendError('');
+    
+    if (!resendEmail || !resendEmail.includes('@')) {
+      setResendError('Пожалуйста, введите корректный email');
+      return;
+    }
+    
+    setIsResendingEmail(true);
+    try {
+      const response = await api.post('/resend-verification', { email: resendEmail });
+      if (response.status === 200) {
+        setResendSuccess(true);
+        toast.success('Новая ссылка для подтверждения отправлена на указанную почту', {
           autoClose: 5000
         });
-      } finally {
-        setIsResendingEmail(false);
+        setTimeout(() => {
+          setResendSuccess(false);
+        }, 5000);
       }
-    } else {
-      // Для неавторизованных пользователей запрашиваем email
-      setResendError('');
+    } catch (error) {
+      console.error('Ошибка при запросе новой ссылки подтверждения:', error);
       
-      if (!resendEmail || !resendEmail.includes('@')) {
-        setResendError('Пожалуйста, введите корректный email');
-        return;
-      }
+      let errorMessage = 'Не удалось отправить новую ссылку. Проверьте введенный email или попробуйте позже.';
       
-      setIsResendingEmail(true);
-      try {
-        const response = await api.post('/resend-verification', { email: resendEmail });
-        if (response.status === 200) {
-          setResendSuccess(true);
-          toast.success('Новая ссылка для подтверждения отправлена на указанную почту', {
+      // Если ошибка связана с уже зарегистрированным email
+      if (error.response && error.response.data && error.response.data.detail) {
+        const detail = error.response.data.detail;
+        if (detail.includes('уже зарегистрирован') || detail.includes('already registered')) {
+          errorMessage = 'Этот email уже зарегистрирован и подтвержден. Вы можете просто войти в систему.';
+          
+          // Показываем toast с более информативным сообщением
+          toast.info('Email уже подтвержден. Пожалуйста, войдите в систему.', {
             autoClose: 5000
           });
+          
+          // Через 3 секунды перенаправляем на страницу входа
           setTimeout(() => {
-            setResendSuccess(false);
-          }, 5000);
+            navigate('/login');
+          }, 3000);
+        } else {
+          errorMessage = detail;
         }
-      } catch (error) {
-        console.error('Ошибка при запросе новой ссылки подтверждения:', error);
-        setResendError('Не удалось отправить новую ссылку. Проверьте введенный email или попробуйте позже.');
-        toast.error('Не удалось отправить новую ссылку. Проверьте email.', {
-          autoClose: 5000
-        });
-      } finally {
-        setIsResendingEmail(false);
       }
+      
+      setResendError(errorMessage);
+      toast.error(errorMessage, {
+        autoClose: 5000
+      });
+    } finally {
+      setIsResendingEmail(false);
     }
   };
 
@@ -240,199 +261,62 @@ const VerifyEmailPage = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               )}
-              {(status === 'error' || status === 'expired') && (
+              {(status === 'error' || status === 'expired' || status === 'already_verified' || status === 'already_registered') && (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               )}
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-center">Подтверждение Email</h1>
+          <h2 className="text-2xl font-bold text-center mb-2">
+            {status === 'loading' && 'Проверка токена...'}
+            {status === 'success' && 'Email подтвержден!'}
+            {status === 'error' && 'Ошибка подтверждения'}
+            {status === 'expired' && 'Срок действия токена истек'}
+            {status === 'no_token' && 'Токен отсутствует'}
+            {status === 'already_verified' && 'Email уже подтвержден'}
+            {status === 'already_registered' && 'Email уже зарегистрирован'}
+          </h2>
         </CardHeader>
-        
-        <CardBody className="py-8 flex flex-col items-center">
-          {status === 'loading' && (
-            <div className="text-center">
-              <Spinner size="lg" color="primary" className="mb-4" />
-              <p className="text-gray-700 mb-6">
-                Ожидаем подтверждения вашего email-адреса.<br/>
-                Пожалуйста, проверьте вашу почту и нажмите на ссылку подтверждения.
-              </p>
-              <div className="bg-blue-50 p-4 rounded-lg text-blue-700 text-sm mb-6 animate-pulse">
-                Эта страница будет автоматически обновлена после подтверждения вашего email.<br/>
-                Не закрывайте её до завершения процесса.
-              </div>
-              <Button
-                color="primary"
-                variant="flat"
-                onClick={goToLogin}
-                className="animate-fadeIn"
-              >
-                Вернуться на страницу входа
-              </Button>
-            </div>
-          )}
           
-          {status === 'no_token' && (
-            <div className="text-center animate-fadeIn">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-warning mx-auto mb-6 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              <h2 className="text-xl font-bold text-warning mb-4">Необходимо подтвердить Email</h2>
-              <p className="text-gray-700 mb-4">
-                Для полного доступа к функционалу платформы требуется подтверждение вашего Email-адреса.
-                Перейдите по ссылке, которую мы отправили на вашу почту.
+        <CardBody className="pb-6 pt-0">
+          {status === 'loading' && (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Spinner size="lg" color="primary" className="mb-4" />
+              <p className="text-gray-600 text-center">
+                Пожалуйста, подождите, идет проверка вашего email...
               </p>
-              
-              {isAuthenticated && !user?.is_active && (
-                <div className="mb-6 animate-fadeIn">
-                  <div className="bg-amber-50 p-4 rounded-lg text-amber-700 text-sm mb-4 border border-amber-200">
-                    <p className="font-medium mb-1">Не получили письмо?</p>
-                    <p>Проверьте папку "Спам" или запросите новую ссылку для подтверждения.</p>
-                  </div>
-                  
-                  {resendSuccess && (
-                    <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-4 border border-green-200 animate-fadeIn">
-                      <p className="font-medium">Новое письмо отправлено!</p>
-                      <p>Проверьте вашу почту.</p>
-                    </div>
-                  )}
-                  
-                  <div className="flex gap-2 justify-center">
-                    <Button
-                      color="warning"
-                      isLoading={isResendingEmail}
-                      onClick={resendVerificationEmail}
-                      className="animate-fadeIn"
-                    >
-                      Отправить письмо повторно
-                    </Button>
-                    
-                    <Button
-                      color="primary"
-                      variant="flat"
-                      onClick={() => navigate('/')}
-                      className="animate-fadeIn"
-                    >
-                      Вернуться на главную
-                    </Button>
-                  </div>
-                </div>
-              )}
-              
-              {!isAuthenticated && (
-                <div className="w-full mb-6 animate-fadeIn">
-                  <div className="bg-amber-50 p-4 rounded-lg text-amber-700 text-sm mb-4 border border-amber-200">
-                    <p className="font-medium mb-1">Не получили письмо?</p>
-                    <p>Проверьте папку "Спам" или запросите новую ссылку для подтверждения, указав ваш email:</p>
-                  </div>
-                  
-                  {resendSuccess && (
-                    <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-4 border border-green-200 animate-fadeIn">
-                      <p className="font-medium">Новое письмо отправлено!</p>
-                      <p>Проверьте вашу почту.</p>
-                    </div>
-                  )}
-                  
-                  {resendError && (
-                    <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200 animate-fadeIn">
-                      <p>{resendError}</p>
-                    </div>
-                  )}
-                  
-                  <div className="flex flex-col gap-3">
-                    <Input
-                      label="Ваш Email"
-                      placeholder="example@mail.com"
-                      value={resendEmail}
-                      onChange={(e) => setResendEmail(e.target.value)}
-                      type="email"
-                      isRequired
-                    />
-                    
-                    <div className="flex gap-2 justify-center mt-2">
-                      <Button
-                        color="warning"
-                        isLoading={isResendingEmail}
-                        onClick={resendVerificationEmail}
-                        fullWidth
-                        className="animate-fadeIn"
-                      >
-                        Отправить письмо повторно
-                      </Button>
-                    </div>
-                    
-                    <Button
-                      color="primary"
-                      variant="flat"
-                      onClick={goToLogin}
-                      fullWidth
-                      className="animate-fadeIn"
-                    >
-                      Вернуться на страницу входа
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
           
           {status === 'success' && (
-            <div className="text-center animate-fadeIn">
-              <div className="animate-bounce mb-6">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-green-500 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+            <div className="flex flex-col items-center justify-center py-6 animate-fadeIn">
+              <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-4 border border-green-200 w-full">
+                <p className="font-medium">Поздравляем!</p>
+                <p>Ваш email успешно подтвержден. Теперь вы можете пользоваться всеми функциями приложения.</p>
+                {redirectCountdown > 0 && (
+                  <p className="mt-2 font-medium">
+                    Перенаправление на страницу профиля через {redirectCountdown} секунд...
+                  </p>
+                )}
               </div>
-              <h2 className="text-xl font-bold text-green-600 mb-4">Email успешно подтвержден!</h2>
-              <p className="text-gray-700 mb-4">
-                Вы автоматически вошли в систему. Перенаправление на главную страницу через {redirectCountdown} сек...
-              </p>
               
-              {hasProfileData && (
-                <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-6 border border-green-200 animate-fadeIn">
-                  <p className="font-medium mb-1">Ваш профиль готов!</p>
-                  <p>Ваши личные данные, указанные при регистрации, будут автоматически сохранены 
-                  при первом входе в систему.</p>
-                </div>
-              )}
-              
-              <Button
-                color="primary"
-                onClick={() => navigate('/')}
-                className="animate-pulse"
+              <Button 
+                color="primary" 
+                className="w-full" 
+                onClick={() => navigate('/profile')}
               >
-                Перейти на главную сейчас
+                Перейти в профиль сейчас
               </Button>
             </div>
           )}
           
           {status === 'error' && (
-            <div className="text-center animate-fadeIn">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-danger mx-auto mb-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h2 className="text-xl font-bold text-danger mb-4">Ошибка подтверждения</h2>
-              <p className="text-gray-700 mb-6">{error}</p>
-              <Button
-                color="primary"
-                onClick={goToLogin}
-                className="animate-fadeIn"
-              >
-                Вернуться на страницу входа
-              </Button>
-            </div>
-          )}
-          
-          {status === 'expired' && (
-            <div className="text-center animate-fadeIn">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-warning mx-auto mb-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h2 className="text-xl font-bold text-warning mb-4">Срок действия ссылки истек</h2>
-              <p className="text-gray-700 mb-6">
-                Ссылка для подтверждения email истекла. Пожалуйста, войдите в систему, чтобы запросить новую ссылку, или запросите ее сейчас:
-              </p>
+            <div className="py-4 animate-fadeIn">
+              <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200">
+                <p className="font-medium">Ошибка подтверждения email</p>
+                <p>{error || 'Произошла ошибка при подтверждении вашего email. Пожалуйста, попробуйте позже или запросите новую ссылку для подтверждения.'}</p>
+              </div>
               
               <div className="w-full mb-6">
                 {resendSuccess && (
@@ -477,9 +361,158 @@ const VerifyEmailPage = () => {
                 color="primary"
                 variant="flat"
                 onClick={goToLogin}
-                className="animate-fadeIn"
+                className="w-full animate-fadeIn"
               >
                 Вернуться на страницу входа
+              </Button>
+            </div>
+          )}
+          
+          {status === 'expired' && (
+            <div className="py-4 animate-fadeIn">
+              <div className="bg-amber-50 p-4 rounded-lg text-amber-700 text-sm mb-4 border border-amber-200">
+                <p className="font-medium">Срок действия ссылки истек</p>
+                <p>К сожалению, ссылка для подтверждения email устарела. Пожалуйста, запросите новую ссылку.</p>
+              </div>
+              
+              <div className="w-full mb-6">
+                {resendSuccess && (
+                  <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-4 border border-green-200 animate-fadeIn">
+                    <p className="font-medium">Новое письмо отправлено!</p>
+                    <p>Проверьте вашу почту.</p>
+                  </div>
+                )}
+
+                {resendError && (
+                  <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200 animate-fadeIn">
+                    <p>{resendError}</p>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3">
+                  <Input
+                    label="Ваш Email"
+                    placeholder="example@mail.com"
+                    value={resendEmail}
+                    onChange={(e) => setResendEmail(e.target.value)}
+                    type="email"
+                    isRequired
+                    className="animate-fadeIn"
+                  />
+                  
+                  <div className="flex gap-2 justify-center mt-2">
+                    <Button
+                      color="warning"
+                      isLoading={isResendingEmail}
+                      onClick={resendVerificationEmail}
+                      fullWidth
+                      className="animate-fadeIn"
+                    >
+                      Запросить новую ссылку
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              
+              <Button
+                color="primary"
+                variant="flat"
+                onClick={goToLogin}
+                className="w-full animate-fadeIn"
+              >
+                Вернуться на страницу входа
+              </Button>
+            </div>
+          )}
+          
+          {status === 'no_token' && (
+            <div className="py-4 animate-fadeIn">
+              <div className="bg-amber-50 p-4 rounded-lg text-amber-700 text-sm mb-4 border border-amber-200">
+                <p className="font-medium">Отсутствует токен подтверждения</p>
+                <p>Необходимо перейти по ссылке из письма, отправленного на ваш email.</p>
+                <p className="mt-2">Если вы не получили письмо, запросите новую ссылку.</p>
+              </div>
+              
+              <div className="w-full mb-6">
+                {resendSuccess && (
+                  <div className="bg-green-50 p-4 rounded-lg text-green-700 text-sm mb-4 border border-green-200 animate-fadeIn">
+                    <p className="font-medium">Новое письмо отправлено!</p>
+                    <p>Проверьте вашу почту.</p>
+                  </div>
+                )}
+
+                {resendError && (
+                  <div className="bg-red-50 p-4 rounded-lg text-red-700 text-sm mb-4 border border-red-200 animate-fadeIn">
+                    <p>{resendError}</p>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3">
+                  <Input
+                    label="Ваш Email"
+                    placeholder="example@mail.com"
+                    value={resendEmail}
+                    onChange={(e) => setResendEmail(e.target.value)}
+                    type="email"
+                    isRequired
+                    className="animate-fadeIn"
+                  />
+                  
+                  <div className="flex gap-2 justify-center mt-2">
+                    <Button
+                      color="warning"
+                      isLoading={isResendingEmail}
+                      onClick={resendVerificationEmail}
+                      fullWidth
+                      className="animate-fadeIn"
+                    >
+                      Запросить новую ссылку
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              
+              <Button
+                color="primary"
+                variant="flat"
+                onClick={goToLogin}
+                className="w-full animate-fadeIn"
+              >
+                Вернуться на страницу входа
+              </Button>
+            </div>
+          )}
+          
+          {status === 'already_verified' && (
+            <div className="py-4 animate-fadeIn">
+              <div className="bg-blue-50 p-4 rounded-lg text-blue-700 text-sm mb-4 border border-blue-200">
+                <p className="font-medium">Email уже подтвержден</p>
+                <p>Ваш email уже был подтвержден ранее. Вы можете войти в систему, используя ваши учетные данные.</p>
+              </div>
+              
+              <Button
+                color="primary"
+                onClick={goToLogin}
+                className="w-full animate-fadeIn"
+              >
+                Перейти на страницу входа
+              </Button>
+            </div>
+          )}
+          
+          {status === 'already_registered' && (
+            <div className="py-4 animate-fadeIn">
+              <div className="bg-yellow-50 p-4 rounded-lg text-yellow-700 text-sm mb-4 border border-yellow-200">
+                <p className="font-medium">Email уже зарегистрирован</p>
+                <p>{error || 'Этот email уже зарегистрирован. Пожалуйста, войдите в систему, используя ваши учетные данные.'}</p>
+              </div>
+              
+              <Button
+                color="primary"
+                onClick={goToLogin}
+                className="w-full animate-fadeIn"
+              >
+                Перейти на страницу входа
               </Button>
             </div>
           )}

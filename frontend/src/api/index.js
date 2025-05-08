@@ -9,8 +9,8 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json', // По умолчанию отправляем JSON
   },
-  // Добавляем параметры для улучшения отладки
-  validateStatus: status => status < 500, // Не считаем 4xx ошибками для более гибкой обработки
+  // Изменяем параметры для правильной обработки ошибок
+  validateStatus: status => status >= 200 && status < 300, // Считаем успешными только 2xx ответы
 });
 
 // Добавляем интерцепторы для логирования запросов
@@ -44,9 +44,18 @@ api.interceptors.response.use(
     // Логируем информацию об ошибке
     if (error.response) {
       console.error(`RESPONSE ERROR: ${error.response.status} - ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        url: error.config?.url,
         data: error.response.data,
+        detail: error.response.data?.detail,
         headers: error.response.headers,
       });
+      
+      // Для отладки - показываем текст ошибки более заметно для 400-x ошибок
+      if (error.response.status >= 400 && error.response.status < 500) {
+        console.error("API ERROR DETAILS:", error.response.data?.detail || "No detail provided");
+      }
     } else if (error.request) {
       console.error('REQUEST MADE BUT NO RESPONSE', error.request);
     } else {

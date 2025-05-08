@@ -178,7 +178,6 @@ const useAuthStore = create((set, get) => ({
       token: null
     });
     
-    let tokenResponse;
     try {
       console.log("login: Sending request to /token endpoint with data:", { username: email });
       
@@ -189,7 +188,7 @@ const useAuthStore = create((set, get) => ({
       });
       
       // Выполняем запрос на получение токена с подробной отладкой
-      tokenResponse = await api.post('/token', formData, {
+      const tokenResponse = await api.post('/token', formData, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
@@ -201,17 +200,174 @@ const useAuthStore = create((set, get) => ({
         hasToken: !!tokenResponse.data.access_token
       });
       
-    } catch (networkError) { // Ловим только СЕТЕВЫЕ ошибки на этом этапе
-      console.error("login: Network error during /token request:", networkError);
+      // Если мы здесь, значит, запрос /token был успешным (статус 2xx)
+      const { access_token } = tokenResponse.data;
+      const token = access_token;
+      
+      if (!token) {
+        console.error("login: Token is missing in successful response");
+        const errorMessage = "Ошибка: токен отсутствует в ответе сервера";
+        set({ 
+          token: null, 
+          user: null, 
+          isAuthenticated: false, 
+          isLoading: false, 
+          error: errorMessage 
+        });
+        toast.error(errorMessage);
+        throw new Error(errorMessage);
+      }
+      
+      setAuthToken(token); // Устанавливаем токен для Axios
+      console.log("login: Token set for API requests");
+      
+      // Теперь пытаемся получить данные пользователя
+      let userResponse;
+      try {
+        console.log("login: Getting user data from /users/me");
+        userResponse = await api.get('/users/me');
+        console.log("login: User data response:", {
+          status: userResponse.status,
+          hasData: !!userResponse.data,
+          userId: userResponse.data?.id,
+          userEmail: userResponse.data?.email
+        });
+      } catch (networkErrorUser) { // Ловим только СЕТЕВЫЕ ошибки на этом этапе
+        console.error("login: Network error during /users/me request:", networkErrorUser);
+        console.error("login: Error details:", {
+          message: networkErrorUser.message,
+          response: networkErrorUser.response ? {
+            status: networkErrorUser.response.status,
+            data: networkErrorUser.response.data
+          } : 'No response'
+        });
+        
+        const errorMessageUser = "Сетевая ошибка при получении данных пользователя.";
+        set({ 
+          token: null, 
+          user: null, 
+          isAuthenticated: false, 
+          isLoading: false, 
+          error: errorMessageUser 
+        });
+        setAuthToken(null); // Сбрасываем токен, так как сессия неполная
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        localStorage.removeItem(USER_STORAGE_KEY);
+        toast.error(errorMessageUser);
+        throw new Error(errorMessageUser);
+      }
+      
+      // Проверяем статус ответа от /users/me
+      if (!userResponse || userResponse.status >= 400) {
+        console.error("login: Failed to get user data. Status:", userResponse?.status, "Data:", userResponse?.data);
+        const errorMessageUser = userResponse?.data?.detail || "Не удалось получить данные пользователя после авторизации.";
+        set({ 
+          token: null, 
+          user: null, 
+          isAuthenticated: false, 
+          isLoading: false, 
+          error: errorMessageUser 
+        });
+        setAuthToken(null); // Сбрасываем токен
+        localStorage.removeItem(TOKEN_STORAGE_KEY); // Удаляем токен, так как данные пользователя не получены
+        localStorage.removeItem(USER_STORAGE_KEY);
+        toast.error(errorMessageUser);
+        throw new Error(errorMessageUser);
+      }
+
+      // Если мы здесь, значит, и /token, и /users/me были успешными
+      const user = userResponse.data;
+      console.log("login: User data received successfully", { userId: user.id, email: user.email });
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      set({ 
+        token, 
+        user, 
+        isAuthenticated: true, 
+        isLoading: false, 
+        error: null 
+      });
+      console.log("login: Auth state updated to authenticated", { 
+        isAuthenticated: true, 
+        hasUser: true, 
+        hasToken: true 
+      });
+      
+      // Показываем уведомление об успехе
+      toast.success('Вход выполнен успешно!');
+      
+      // Проверяем, есть ли данные профиля для создания после входа
+      try {
+        const storedProfileData = localStorage.getItem('vrach_registration_profile');
+        if (storedProfileData && user.role === 'patient') {
+          console.log('login: Found patient profile data, attempting to create profile');
+          const profileData = JSON.parse(storedProfileData);
+          await get().createOrUpdatePatientProfile(profileData);
+          localStorage.removeItem('vrach_registration_profile');
+        }
+      } catch (profileError) {
+        console.error('login: Error creating profile after login:', profileError);
+      }
+      
+      return user;
+    } catch (error) {
+      console.error("login: Error during login:", error);
       console.error("login: Error details:", {
-        message: networkError.message,
-        response: networkError.response ? {
-          status: networkError.response.status,
-          data: networkError.response.data
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data
         } : 'No response'
       });
       
-      const errorMessage = "Сетевая ошибка при попытке входа. Проверьте подключение.";
+      // Определяем соответствующее сообщение об ошибке
+      let errorMessage = "Произошла ошибка при входе. Пожалуйста, попробуйте позже.";
+      
+      if (error.response) {
+        // Если у нас есть ответ от сервера с ошибкой, обрабатываем его
+        const status = error.response.status;
+        const detail = error.response.data?.detail;
+        
+        if (status === 401) {
+          errorMessage = "Неверный логин или пароль. Пожалуйста, проверьте введенные данные.";
+        } else if (status === 403) {
+          // Проверка специального случая - неподтвержденный email
+          if (detail && 
+              (detail.includes("подтвердите") || 
+               detail.includes("verify") || 
+               detail.includes("confirm") ||
+               detail.includes("verification"))) {
+            errorMessage = detail || "Пожалуйста, подтвердите ваш email перед входом.";
+            console.log("login: Email verification required error detected");
+            
+            // Если сервер вернул email, сохраняем его для возможности повторной отправки
+            if (error.response.data.email) {
+              set({
+                pendingVerificationEmail: error.response.data.email
+              });
+            } else {
+              // Если email не вернулся с сервера, используем email из формы
+              set({
+                pendingVerificationEmail: email
+              });
+            }
+          } else {
+            errorMessage = detail || "Доступ запрещен. Пожалуйста, свяжитесь с администратором.";
+          }
+        } else if (status === 429) {
+          errorMessage = "Слишком много попыток входа. Пожалуйста, попробуйте позже.";
+        } else if (detail) {
+          errorMessage = detail;
+        }
+      } else if (error.request) {
+        // Запрос был отправлен, но не получен ответ (сетевая проблема)
+        errorMessage = "Сетевая ошибка при попытке входа. Проверьте подключение к интернету.";
+      } else {
+        // Что-то случилось при настройке запроса
+        errorMessage = error.message || "Ошибка при попытке входа.";
+      }
+      
       set({ 
         token: null, 
         user: null, 
@@ -225,169 +381,6 @@ const useAuthStore = create((set, get) => ({
       toast.error(errorMessage);
       throw new Error(errorMessage); // Пробрасываем, чтобы форма отреагировала
     }
-
-    // Проверяем статус ответа от /token
-    if (!tokenResponse || tokenResponse.status >= 400) {
-      console.error("login: Failed to get token. Status:", tokenResponse?.status, "Data:", tokenResponse?.data);
-      let errorMessage = "Неверный логин или пароль."; // По умолчанию
-      
-      if (tokenResponse?.status === 401) {
-        errorMessage = "Неверный логин или пароль.";
-      } else if (tokenResponse?.status === 403) {
-        // Проверка специального случая - неподтвержденный email
-        if (tokenResponse?.data?.detail && 
-            (tokenResponse.data.detail.includes("подтвердите") || 
-             tokenResponse.data.detail.includes("verify") || 
-             tokenResponse.data.detail.includes("confirm") ||
-             tokenResponse.data.detail.includes("verification"))) {
-          errorMessage = tokenResponse.data.detail || "Пожалуйста, подтвердите ваш email перед входом.";
-          console.log("login: Email verification required error detected");
-          
-          // Если сервер вернул email, сохраняем его для возможности повторной отправки
-          if (tokenResponse.data.email) {
-            set({
-              pendingVerificationEmail: tokenResponse.data.email
-            });
-          } else {
-            // Если email не вернулся с сервера, используем email из формы
-            set({
-              pendingVerificationEmail: email
-            });
-          }
-        } else {
-          errorMessage = tokenResponse.data.detail || "Доступ запрещен. Пожалуйста, свяжитесь с администратором.";
-        }
-      } else if (tokenResponse?.status === 429) {
-        errorMessage = "Слишком много попыток входа. Пожалуйста, попробуйте позже.";
-      } else if (tokenResponse?.data?.detail) {
-        errorMessage = tokenResponse.data.detail;
-      }
-      
-      set({ 
-        token: null, 
-        user: null, 
-        isAuthenticated: false, 
-        isLoading: false, 
-        error: errorMessage 
-      });
-      setAuthToken(null);
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      localStorage.removeItem(USER_STORAGE_KEY);
-      toast.error(errorMessage);
-      throw new Error(errorMessage); // Пробрасываем ошибку
-    }
-
-    // Если мы здесь, значит, запрос /token был успешным (статус 2xx)
-    console.log("login: Token request successful. Status:", tokenResponse.status);
-    const { access_token } = tokenResponse.data;
-    const token = access_token;
-    
-    if (!token) {
-      console.error("login: Token is missing in successful response");
-      const errorMessage = "Ошибка: токен отсутствует в ответе сервера";
-      set({ 
-        token: null, 
-        user: null, 
-        isAuthenticated: false, 
-        isLoading: false, 
-        error: errorMessage 
-      });
-      toast.error(errorMessage);
-      throw new Error(errorMessage);
-    }
-    
-    setAuthToken(token); // Устанавливаем токен для Axios
-    console.log("login: Token set for API requests");
-
-    // Теперь пытаемся получить данные пользователя
-    let userResponse;
-    try {
-      console.log("login: Getting user data from /users/me");
-      userResponse = await api.get('/users/me');
-      console.log("login: User data response:", {
-        status: userResponse.status,
-        hasData: !!userResponse.data,
-        userId: userResponse.data?.id,
-        userEmail: userResponse.data?.email
-      });
-    } catch (networkErrorUser) { // Ловим только СЕТЕВЫЕ ошибки на этом этапе
-      console.error("login: Network error during /users/me request:", networkErrorUser);
-      console.error("login: Error details:", {
-        message: networkErrorUser.message,
-        response: networkErrorUser.response ? {
-          status: networkErrorUser.response.status,
-          data: networkErrorUser.response.data
-        } : 'No response'
-      });
-      
-      const errorMessageUser = "Сетевая ошибка при получении данных пользователя.";
-      set({ 
-        token: null, 
-        user: null, 
-        isAuthenticated: false, 
-        isLoading: false, 
-        error: errorMessageUser 
-      });
-      setAuthToken(null); // Сбрасываем токен, так как сессия неполная
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      localStorage.removeItem(USER_STORAGE_KEY);
-      toast.error(errorMessageUser);
-      throw new Error(errorMessageUser);
-    }
-    
-    // Проверяем статус ответа от /users/me
-    if (!userResponse || userResponse.status >= 400) {
-      console.error("login: Failed to get user data. Status:", userResponse?.status, "Data:", userResponse?.data);
-      const errorMessageUser = userResponse?.data?.detail || "Не удалось получить данные пользователя после авторизации.";
-      set({ 
-        token: null, 
-        user: null, 
-        isAuthenticated: false, 
-        isLoading: false, 
-        error: errorMessageUser 
-      });
-      setAuthToken(null); // Сбрасываем токен
-      localStorage.removeItem(TOKEN_STORAGE_KEY); // Удаляем токен, так как данные пользователя не получены
-      localStorage.removeItem(USER_STORAGE_KEY);
-      toast.error(errorMessageUser);
-      throw new Error(errorMessageUser);
-    }
-
-    // Если мы здесь, значит, и /token, и /users/me были успешными
-    const user = userResponse.data;
-    console.log("login: User data received successfully", { userId: user.id, email: user.email });
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-    set({ 
-      token, 
-      user, 
-      isAuthenticated: true, 
-      isLoading: false, 
-      error: null 
-    });
-    console.log("login: Auth state updated to authenticated", { 
-      isAuthenticated: true, 
-      hasUser: true, 
-      hasToken: true 
-    });
-    
-    // Показываем уведомление об успехе
-    toast.success('Вход выполнен успешно!');
-    
-    // Проверяем, есть ли данные профиля для создания после входа
-    try {
-      const storedProfileData = localStorage.getItem('vrach_registration_profile');
-      if (storedProfileData && user.role === 'patient') {
-        console.log('login: Found patient profile data, attempting to create profile');
-        const profileData = JSON.parse(storedProfileData);
-        await get().createOrUpdatePatientProfile(profileData);
-        localStorage.removeItem('vrach_registration_profile');
-      }
-    } catch (profileError) {
-      console.error('login: Error creating profile after login:', profileError);
-    }
-    
-    return user;
   },
 
   // Функция для аутентификации через Google
@@ -507,9 +500,9 @@ const useAuthStore = create((set, get) => ({
 
   // Функция для регистрации нового пользователя
   registerUser: async (userData) => {
-    set({ isLoading: true, error: null }); // Начинаем загрузку, сбрасываем ошибки
-    
-    let email, password, role, profileData;
+    set({ isLoading: true, error: null, pendingVerificationEmail: null }); // Сброс ошибок и состояния проверки email
+
+    let email, password, role, full_name, contact_phone, district, contact_address, medical_info;
     
     // Проверяем формат входных данных
     if (typeof userData === 'object') {
@@ -517,37 +510,73 @@ const useAuthStore = create((set, get) => ({
       email = userData.email;
       password = userData.password;
       role = userData.role;
-      profileData = userData.profile;
+      full_name = userData.full_name;
+      contact_phone = userData.contact_phone;
+      district = userData.district;
+      contact_address = userData.contact_address;
+      medical_info = userData.medical_info;
     } else {
       // Если переданы отдельные параметры (для обратной совместимости)
       email = arguments[0];
       password = arguments[1];
       role = arguments[2];
-      profileData = arguments[3];
+      // Для старого формата профиль может быть 4-м аргументом
+      const profileData = arguments[3] || {};
+      full_name = profileData.full_name;
+      contact_phone = profileData.contact_phone;
+      district = profileData.district;
+      contact_address = profileData.contact_address;
+      medical_info = profileData.medical_info;
     }
     
     try {
       console.log("registerUser: Starting registration process for email:", email);
+      console.log("registerUser: Profile data:", { full_name, contact_phone, district, contact_address, medical_info });
       
-      // Отправляем запрос регистрации на бэкенд
-      const response = await api.post('/register', { email, password, role });
+      // Отправляем запрос регистрации на бэкенд со всеми данными профиля
+      const response = await api.post('/register', { 
+        email, 
+        password, 
+        role,
+        full_name,
+        contact_phone,
+        district,
+        contact_address,
+        medical_info
+      });
       
-      // Проверяем ответ и наличие флага требования подтверждения email
-      const emailVerificationRequired = response.data.email_verification_required === true;
+      // ВАЖНО: Проверяем, что ответ действительно успешный (статус 2xx)
+      // Иначе api.post может вернуть ответ с ошибкой из-за настройки validateStatus: status => status < 500
+      if (response.status >= 400) {
+        console.error("registerUser: Error response received:", response.status, response.data);
+        throw new Error(response.data?.detail || 'Ошибка регистрации');
+      }
+      
+      // Если дошли до этой точки, значит запрос успешен (статус 2xx)
+      console.log("registerUser: Backend responded with success:", response.status, response.data);
+      
+      const data = response.data;
+      const accessToken = data.access_token;
+      
+      // Проверяем, требуется ли подтверждение email
+      // Это может быть явный флаг или пустой/отсутствующий токен
+      const emailVerificationRequired = data.email_verification_required === true || !accessToken;
       
       // Если требуется подтверждение email
       if (emailVerificationRequired) {
         console.log("registerUser: Registration successful, email verification required");
         
-        // Если переданы данные профиля, сохраняем их в localStorage для использования после подтверждения
-        if (profileData) {
-          const profileDataToStore = {
-            ...profileData,
-            email, // Добавляем email для возможности повторной отправки письма
-          };
-          localStorage.setItem('vrach_registration_profile', JSON.stringify(profileDataToStore));
-          console.log("registerUser: Profile data saved for later use after verification");
-        }
+        // Сохраняем данные профиля для использования после подтверждения email
+        const profileDataToStore = {
+          email, // Добавляем email для возможности повторной отправки письма
+          full_name,
+          contact_phone,
+          district,
+          contact_address,
+          medical_info
+        };
+        localStorage.setItem('vrach_registration_profile', JSON.stringify(profileDataToStore));
+        console.log("registerUser: Profile data saved for later use after verification:", profileDataToStore);
         
         // Показываем уведомление
         toast.success('Регистрация выполнена успешно! Проверьте почту для подтверждения email.');
@@ -570,66 +599,109 @@ const useAuthStore = create((set, get) => ({
       }
       
       // Если НЕ требуется подтверждение email (например, для специальных аккаунтов или в режиме разработки)
-      // Получаем токен из ответа сервера и выполняем вход
       console.log("registerUser: Registration successful, no email verification required");
-      const { access_token } = response.data;
-      const token = access_token;
       
       // Сохраняем токен в axios для автоматической авторизации последующих запросов
-      setAuthToken(token);
+      setAuthToken(accessToken);
       
-      // Получаем информацию о пользователе
-      const userResponse = await api.get('/users/me');
-      const user = userResponse.data;
-      
-      // Сохраняем данные в localStorage
-      localStorage.setItem(TOKEN_STORAGE_KEY, token);
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-      
-      // Если нужно, сохраняем данные профиля для последующего создания
-      if (profileData) {
-        localStorage.setItem('vrach_registration_profile', JSON.stringify(profileData));
+      try {
+        // Получаем информацию о пользователе
+        const userResponse = await api.get('/users/me');
+        const user = userResponse.data;
+        
+        // Сохраняем данные в localStorage
+        localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+        
+        // Сохраняем данные профиля для последующего создания
+        const profileDataToStore = {
+          email,
+          full_name,
+          contact_phone,
+          district,
+          contact_address,
+          medical_info
+        };
+        localStorage.setItem('vrach_registration_profile', JSON.stringify(profileDataToStore));
+        console.log("registerUser: Profile data saved for later use:", profileDataToStore);
+        
+        // Show success notification
+        toast.success('Регистрация выполнена успешно!');
+        
+        // Обновляем состояние
+        set({ 
+          token: accessToken, 
+          user, 
+          isAuthenticated: true, 
+          isLoading: false, 
+          error: null
+        });
+        
+        return user;
+      } catch (userError) {
+        console.error("Error fetching user data after registration:", userError);
+        
+        // Если не удалось получить данные пользователя, но регистрация успешна
+        // Показываем уведомление и просим пользователя войти
+        toast.warning('Регистрация выполнена, но не удалось автоматически войти. Пожалуйста, войдите вручную.');
+        
+        set({ isLoading: false });
+        return { success: true, requiresManualLogin: true };
       }
-      
-      // Show success notification
-      toast.success('Регистрация выполнена успешно!');
-      
-      // Обновляем состояние
-      set({ 
-        token, 
-        user, 
-        isAuthenticated: true, 
-        isLoading: false, 
-        error: null
-      });
-      
-      return user;
     } catch (error) {
+      // Ошибка при регистрации
       console.error("Registration failed", error);
       
       // Извлекаем сообщение об ошибке из ответа бэкенда
       let errorMessage = "Ошибка регистрации. Пожалуйста, попробуйте позже.";
       
+      // Если есть ответ от сервера, пытаемся получить детали ошибки
       if (error.response) {
-        errorMessage = error.response?.data?.detail || errorMessage;
+        console.log("Registration error response:", error.response.status, error.response.data);
         
-        // Проверка на ошибки, связанные с дублированием почты
-        if (errorMessage.includes("already registered")) {
-          console.log("Email already registered error detected");
+        // Полностью логируем ответ для отладки
+        console.log("Registration error full response:", {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          detail: error.response.data?.detail
+        });
+        
+        // Получаем сообщение об ошибке из ответа сервера
+        if (error.response.data && error.response.data.detail) {
+          let errorDetail = error.response.data.detail;
+          console.log("Registration error detail:", errorDetail);
           
-          // Если в сообщении есть упоминание о Google
-          if (errorMessage.includes("Google")) {
-            console.log("Google account already exists error detected");
+          // Используем оригинальное сообщение об ошибке с сервера, если оно есть
+          errorMessage = errorDetail;
+          
+          // Более специфичная обработка разных типов ошибок
+          if (errorDetail.toLowerCase().includes('email') && 
+              errorDetail.toLowerCase().includes('уже зарегистрирован')) {
+            errorMessage = "Этот email уже зарегистрирован. Пожалуйста, используйте другой email или выполните вход.";
+          } else if (errorDetail.toLowerCase().includes('телефон') && 
+                     errorDetail.toLowerCase().includes('уже зарегистрирован')) {
+            errorMessage = "Этот номер телефона уже зарегистрирован. Пожалуйста, используйте другой номер или выполните вход.";
+          } else if (errorDetail.toLowerCase().includes('уже зарегистрирован')) {
+            errorMessage = "Пользователь с этими данными уже зарегистрирован. Пожалуйста, используйте другие данные или выполните вход.";
+          } else if (errorDetail.toLowerCase().includes('already registered')) {
+            errorMessage = "Пользователь с этими данными уже зарегистрирован. Пожалуйста, используйте другие данные или выполните вход.";
           }
         }
+      } else {
+        // Если нет ответа - это сетевая ошибка
+        console.log("Network error during registration:", error.message);
       }
       
-      // Show error notification
+      // Выводим детальный лог для отладки
+      console.log("Final error message:", errorMessage);
+      
+      // Show error notification with appropriate styling based on error message
       if (errorMessage.includes('Google')) {
         toast.info(errorMessage, {
           style: { background: '#EFF6FF', color: '#1E40AF', borderLeft: '4px solid #3B82F6' }
         });
-      } else if (errorMessage.includes('already registered')) {
+      } else if (errorMessage.includes('уже зарегистрирован') || errorMessage.includes('already registered')) {
         toast.warning(errorMessage, {
           style: { background: '#FEF9C3', color: '#854D0E', borderLeft: '4px solid #EAB308' }
         });
@@ -637,8 +709,18 @@ const useAuthStore = create((set, get) => ({
         toast.error(errorMessage);
       }
       
-      set({ isLoading: false, error: errorMessage });
-      throw new Error(errorMessage);
+      // Важно: сбрасываем pendingVerificationEmail, устанавливаем ошибку
+      set({ 
+        isLoading: false, 
+        error: errorMessage,
+        pendingVerificationEmail: null // Явно сбрасываем, чтобы предотвратить редирект
+      });
+      
+      // Возвращаем результат с ошибкой
+      return {
+        success: false, 
+        error: errorMessage
+      };
     }
   },
 
@@ -653,20 +735,13 @@ const useAuthStore = create((set, get) => ({
 
       console.log('Создание/обновление профиля пациента. Исходные данные:', profileData);
       
-      // Убедимся, что district правильно передается
-      if (!profileData.district && profileData.profile && profileData.profile.district) {
-        profileData.district = profileData.profile.district;
-      }
-      
       // Формируем данные профиля
       const patientProfileData = {
-        full_name: profileData.firstName && profileData.lastName ? 
-          `${profileData.lastName} ${profileData.firstName} ${profileData.middleName || ''}`.trim() : 
-          (profileData.full_name || profileData.profile?.full_name || null),
-        contact_phone: profileData.phone || profileData.contact_phone || profileData.profile?.contact_phone || null,
-        contact_address: profileData.address || profileData.contact_address || profileData.profile?.contact_address || null,
-        district: profileData.district || profileData.profile?.district || null,
-        medical_info: profileData.additionalInfo || profileData.medical_info || profileData.profile?.medical_info || null
+        full_name: profileData.full_name || '',
+        contact_phone: profileData.contact_phone || '',
+        district: profileData.district || '',
+        contact_address: profileData.contact_address || '',
+        medical_info: profileData.medical_info || ''
       };
       
       console.log('Данные профиля после обработки:', patientProfileData);
