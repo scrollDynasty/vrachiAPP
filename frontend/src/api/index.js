@@ -16,16 +16,33 @@ const api = axios.create({
 // Добавляем интерцепторы для логирования запросов
 api.interceptors.request.use(
   config => {
-    // Логируем информацию о запросе
-    console.log(`REQUEST: ${config.method.toUpperCase()} ${config.url}`, { 
-      headers: config.headers,
-      data: config.data,
-      params: config.params
-    });
+    // Полноценное логирование запроса
+    const logLevel = config.url.includes('csrf-token') || config.url.includes('change-password') 
+      ? 'info' // Важные запросы логируем с уровнем info
+      : 'debug'; // Остальные с уровнем debug
+
+    if (logLevel === 'info') {
+      console.info(`🌐 REQUEST: ${config.method.toUpperCase()} ${config.url}`);
+      console.info('Headers:', config.headers);
+      
+      // Для методов с телом логируем данные
+      if (config.data) {
+        try {
+          // Маскируем пароли в логах для безопасности
+          const safeData = { ...config.data };
+          if (safeData.current_password) safeData.current_password = '********';
+          if (safeData.new_password) safeData.new_password = '********';
+          console.info('Data:', safeData);
+        } catch (e) {
+          console.info('Data: [Cannot stringify request data]');
+        }
+      }
+    }
+    
     return config;
   },
   error => {
-    console.error('REQUEST ERROR:', error);
+    console.error('🛑 REQUEST ERROR:', error);
     return Promise.reject(error);
   }
 );
@@ -33,33 +50,37 @@ api.interceptors.request.use(
 // Добавляем интерцепторы для логирования ответов
 api.interceptors.response.use(
   response => {
-    // Логируем информацию об успешном ответе
-    console.log(`RESPONSE: ${response.status} - ${response.config.method.toUpperCase()} ${response.config.url}`, { 
-      data: response.data,
-      headers: response.headers,
-    });
+    // Логируем только важные ответы
+    if (response.config.url.includes('csrf-token') || response.config.url.includes('change-password')) {
+      console.info(`✅ RESPONSE: ${response.config.method.toUpperCase()} ${response.config.url}`);
+      console.info('Status:', response.status);
+      console.info('Data:', response.data);
+    }
     return response;
   },
   error => {
-    // Логируем информацию об ошибке
+    console.error(`🛑 RESPONSE ERROR: ${error.message}`);
     if (error.response) {
-      console.error(`RESPONSE ERROR: ${error.response.status} - ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        url: error.config?.url,
-        data: error.response.data,
-        detail: error.response.data?.detail,
-        headers: error.response.headers,
-      });
+      console.error(`Статус ошибки: ${error.response.status}`);
       
-      // Для отладки - показываем текст ошибки более заметно для 400-x ошибок
-      if (error.response.status >= 400 && error.response.status < 500) {
-        console.error("API ERROR DETAILS:", error.response.data?.detail || "No detail provided");
+      // Более подробный вывод для ошибок смены пароля
+      if (error.config.url.includes('change-password')) {
+        console.error('Детальная информация об ошибке смены пароля:');
+        console.error('Статус:', error.response.status);
+        console.error('Заголовки:', error.response.headers);
+        console.error('Данные ответа:', error.response.data);
+        
+        // Если есть конкретная причина ошибки
+        if (error.response.data && error.response.data.detail) {
+          console.error('Причина ошибки:', error.response.data.detail);
+        }
+      } else {
+        console.error('Данные ответа:', error.response.data);
       }
     } else if (error.request) {
-      console.error('REQUEST MADE BUT NO RESPONSE', error.request);
+      console.error('Запрос был отправлен, но ответ не получен:', error.request);
     } else {
-      console.error('REQUEST SETUP ERROR', error.message);
+      console.error('Ошибка при подготовке запроса:', error.message);
     }
     return Promise.reject(error);
   }
@@ -70,8 +91,23 @@ api.interceptors.response.use(
 export const setAuthToken = (token) => {
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    console.info('🔑 Auth token set in API headers');
   } else {
     delete api.defaults.headers.common['Authorization'];
+    console.info('🔑 Auth token removed from API headers');
+  }
+};
+
+// Вспомогательная функция для получения CSRF токена
+export const getCsrfToken = async () => {
+  try {
+    console.info('🔒 Requesting new CSRF token...');
+    const response = await api.get('/csrf-token');
+    console.info('🔒 CSRF token received');
+    return response.data.csrf_token;
+  } catch (error) {
+    console.error('🛑 Failed to get CSRF token:', error);
+    throw error;
   }
 };
 

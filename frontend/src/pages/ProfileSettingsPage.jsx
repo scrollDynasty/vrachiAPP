@@ -11,6 +11,7 @@ import DoctorProfileForm from '../components/DoctorProfileForm'; // <--- ИМП�
 
 // Импортируем NextUI компоненты
 import { Card, CardBody, CardHeader, Divider, Avatar, Button, Spinner } from '@nextui-org/react';
+import { toast } from 'react-toastify';
 
 // Страница для просмотра и редактирования настроек профиля пользователя (Пациента или Врача)
 // Отображается по маршруту /profile (защищен ProtectedRoute)
@@ -28,13 +29,11 @@ function ProfileSettingsPage() {
   const [isSaving, setIsSaving] = useState(false); // Флаг процесса сохранения (для индикатора на кнопке формы)
   const [isCreatingFromRegistration, setIsCreatingFromRegistration] = useState(false);
 
-
   // Получаем данные текущего пользователя (включая роль) из стора аутентификации
   const { user, isAuthenticated } = useAuthStore();
   const createOrUpdatePatientProfile = useAuthStore((state) => state.createOrUpdatePatientProfile);
   const parseProfileFromRegistration = useAuthStore((state) => state.parseProfileFromRegistration);
   // const setUser = useAuthStore((state) => state.setUser); // Функция для обновления пользователя в сторе (если понадобится)
-
 
   // Эффект выполняется при монтировании компонента и при изменении user.id/isAuthenticated
   useEffect(() => {
@@ -165,7 +164,6 @@ function ProfileSettingsPage() {
         setIsSaving(false); // Завершаем сохранение в любом случае
      }
   };
-
 
   // --- Отображение UI страницы настроек профиля ---
 

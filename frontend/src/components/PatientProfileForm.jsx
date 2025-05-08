@@ -4,7 +4,7 @@ import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, Modal
 import { motion } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { notificationsApi } from '../api'; // Импортируем API для уведомлений
-import api from '../api'; // Импортируем основной API для получения CSRF токена
+import api, { getCsrfToken } from '../api'; // Импортируем основной API и функцию для получения CSRF токена
 
 // Анимационные варианты для элементов
 const fadeIn = {
@@ -121,8 +121,8 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    useEffect(() => {
       const fetchCsrfToken = async () => {
          try {
-            const response = await api.get('/csrf-token');
-            setCsrfToken(response.data.csrf_token);
+            const token = await getCsrfToken();
+            setCsrfToken(token);
          } catch (error) {
             console.error('Ошибка при получении CSRF токена:', error);
          }
@@ -178,7 +178,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    
    // Обработчик изменения пароля
    const handleChangePassword = async (event) => {
-      event.preventDefault();
+      event?.preventDefault();
       setPasswordError(null);
       setIsChangingPassword(true);
       
@@ -186,59 +186,146 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          // Валидация
          if (!currentPassword) {
             setPasswordError("Пожалуйста, введите текущий пароль");
+            setIsChangingPassword(false);
             return;
          }
          
          if (!newPassword) {
             setPasswordError("Пожалуйста, введите новый пароль");
+            setIsChangingPassword(false);
             return;
          }
          
          if (newPassword.length < 8) {
             setPasswordError("Новый пароль должен содержать минимум 8 символов");
+            setIsChangingPassword(false);
             return;
          }
          
          if (newPassword !== confirmPassword) {
             setPasswordError("Пароли не совпадают");
+            setIsChangingPassword(false);
             return;
          }
          
-         // Отправляем запрос на смену пароля с CSRF токеном
-         await api.post('/users/me/change-password', {
-            csrf_token: csrfToken,
-            current_password: currentPassword,
-            new_password: newPassword
-         });
+         // Проверка, что новый пароль не совпадает со старым
+         if (newPassword === currentPassword) {
+            setPasswordError("Новый пароль должен отличаться от текущего");
+            setIsChangingPassword(false);
+            return;
+         }
          
-         // Показываем уведомление об успешной смене пароля
-         toast.success('Пароль успешно изменен', {
-            position: 'top-right',
-            autoClose: 3000,
-            hideProgressBar: false,
-            closeOnClick: true,
-            pauseOnHover: true,
-            draggable: true
-         });
+         // Проверка наличия CSRF токена
+         if (!csrfToken) {
+            console.error('CSRF токен отсутствует. Получаем новый токен...');
+            try {
+               const tokenResponse = await api.get('/csrf-token');
+               setCsrfToken(tokenResponse.data.csrf_token);
+            } catch (tokenError) {
+               console.error('Не удалось получить CSRF токен:', tokenError);
+               setPasswordError("Ошибка безопасности. Пожалуйста, обновите страницу и попробуйте снова.");
+               setIsChangingPassword(false);
+               return;
+            }
+         }
          
-         // Очищаем поля формы после успешной смены пароля
-         setCurrentPassword('');
-         setNewPassword('');
-         setConfirmPassword('');
+         console.log('Отправка запроса на смену пароля...');
          
-         // Закрываем модальное окно
-         setPasswordModalOpen(false);
-         
-         // Получаем новый CSRF токен после успешной операции
-         const response = await api.get('/csrf-token');
-         setCsrfToken(response.data.csrf_token);
+         // Всегда получаем свежий CSRF токен перед отправкой запроса на смену пароля
+         try {
+            const freshTokenResponse = await api.get('/csrf-token');
+            const freshToken = freshTokenResponse.data.csrf_token;
+            console.log('Получен свежий CSRF токен для смены пароля');
+            
+            // Отправляем запрос на смену пароля с свежим CSRF токеном
+            const changePasswordResponse = await api.post('/users/me/change-password', {
+               csrf_token: freshToken,
+               current_password: currentPassword,
+               new_password: newPassword
+            });
+            
+            console.log('Ответ от сервера:', changePasswordResponse);
+            
+            // Показываем уведомление об успешной смене пароля
+            toast.success('Пароль успешно изменен', {
+               position: 'top-right',
+               autoClose: 3000,
+               hideProgressBar: false,
+               closeOnClick: true,
+               pauseOnHover: true,
+               draggable: true
+            });
+            
+            // Очищаем поля формы после успешной смены пароля
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            
+            // Закрываем модальное окно
+            setPasswordModalOpen(false);
+            
+            // Получаем новый CSRF токен после успешной операции
+            const newToken = await getCsrfToken();
+            setCsrfToken(newToken);
+            
+         } catch (error) {
+            console.error('Ошибка при смене пароля:', error);
+            
+            // Получаем сообщение ошибки из ответа сервера, если оно есть
+            let errorMessage = 'Не удалось изменить пароль. Пожалуйста, проверьте введенные данные.';
+            
+            if (error.response?.data) {
+               if (error.response.status === 401) {
+                  errorMessage = 'Неверный текущий пароль. Пожалуйста, проверьте правильность ввода.';
+               } else if (error.response.status === 400) {
+                  // Специальная обработка для Bad Request
+                  if (error.response.data.detail) {
+                     const detail = error.response.data.detail;
+                     console.info('Детальная ошибка 400:', detail);
+                     
+                     if (detail.includes('Invalid CSRF token') || detail.includes('CSRF token missing')) {
+                        errorMessage = 'Ошибка безопасности. Пожалуйста, обновите страницу и попробуйте снова.';
+                     } else if (detail.includes('Current password is incorrect') || detail.includes('Wrong password')) {
+                        errorMessage = 'Неверный текущий пароль. Пожалуйста, проверьте правильность ввода.';
+                     } else if (detail.includes('Password change failed')) {
+                        errorMessage = 'Неверный текущий пароль. Пожалуйста, проверьте правильность ввода.';
+                     } else {
+                        errorMessage = 'Ошибка при смене пароля. Пожалуйста, проверьте введенные данные.';
+                     }
+                  } else if (typeof error.response.data === 'string') {
+                     // Если сервер вернул текстовую ошибку
+                     if (error.response.data.includes('Password change failed') || 
+                         error.response.data.includes('Current password is incorrect')) {
+                        errorMessage = 'Неверный текущий пароль. Пожалуйста, проверьте правильность ввода.';
+                     } else {
+                        errorMessage = 'Ошибка при смене пароля. Пожалуйста, проверьте введенные данные.';
+                     }
+                  }
+               } else if (error.response.data.detail) {
+                  // Проверяем английские сообщения и заменяем их на русские
+                  const detail = error.response.data.detail;
+                  if (detail.includes('Password change failed')) {
+                     errorMessage = 'Ошибка при смене пароля. Пожалуйста, проверьте введенные данные.';
+                  } else if (detail.includes('Current password is incorrect')) {
+                     errorMessage = 'Неверный текущий пароль. Пожалуйста, проверьте правильность ввода.';
+                  } else if (detail.includes('Password too short')) {
+                     errorMessage = 'Новый пароль слишком короткий. Минимальная длина - 8 символов.';
+                  } else if (detail.includes('Password too weak')) {
+                     errorMessage = 'Новый пароль слишком простой. Используйте комбинацию букв, цифр и специальных символов.';
+                  } else {
+                     // Если получен какой-то другой текст ошибки, используем его
+                     errorMessage = detail;
+                  }
+               }
+            }
+            
+            setPasswordError(errorMessage);
+         } finally {
+            setIsChangingPassword(false);
+         }
       } catch (error) {
-         console.error('Ошибка при смене пароля:', error);
-         
-         // Получаем сообщение ошибки из ответа сервера, если оно есть
-         const errorMessage = error.response?.data?.detail || 'Не удалось изменить пароль. Попробуйте позже';
-         setPasswordError(errorMessage);
-      } finally {
+         console.error('Неожиданная ошибка при смене пароля:', error);
+         setPasswordError('Произошла неожиданная ошибка. Пожалуйста, попробуйте позже.');
          setIsChangingPassword(false);
       }
    };
@@ -743,10 +830,15 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                         />
                      </ModalBody>
                      <ModalFooter>
-                        <Button color="default" variant="light" onPress={onClose} isDisabled={isChangingPassword}>
+                        <Button color="default" variant="light" onClick={onClose} isDisabled={isChangingPassword}>
                            Отмена
                         </Button>
-                        <Button color="primary" onPress={handleChangePassword} isLoading={isChangingPassword}>
+                        <Button 
+                           color="primary" 
+                           onClick={handleChangePassword} 
+                           isLoading={isChangingPassword}
+                           isDisabled={!currentPassword || !newPassword || !confirmPassword || newPassword !== confirmPassword || newPassword.length < 8}
+                        >
                            Изменить пароль
                         </Button>
                      </ModalFooter>
