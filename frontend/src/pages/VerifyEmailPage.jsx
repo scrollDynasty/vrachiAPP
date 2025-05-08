@@ -1,6 +1,6 @@
 // frontend/src/pages/VerifyEmailPage.jsx
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import api from '../api';
 import { Button, Spinner, Card, CardHeader, CardBody, Input } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
@@ -20,7 +20,12 @@ const VerifyEmailPage = () => {
   const [resendError, setResendError] = useState('');
   const [redirectCountdown, setRedirectCountdown] = useState(5);
   const navigate = useNavigate();
-  const { login, initializeAuth, pendingVerificationEmail } = useAuthStore();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const pendingVerificationEmail = useAuthStore((state) => state.pendingVerificationEmail);
+  const handleEmailVerification = useAuthStore((state) => state.handleEmailVerification);
+  const { isAuthenticated } = useAuthStore();
+  const initializeAuth = useAuthStore((state) => state.initializeAuth);
 
   // Проверка наличия токена и данных профиля
   useEffect(() => {
@@ -79,27 +84,30 @@ const VerifyEmailPage = () => {
         return;
       }
       
+      // Проверяем, был ли уже выполнен запрос верификации для этого компонента
+      if (verificationAttempted) {
+        console.log('Верификация уже была выполнена, пропускаем повторный запрос');
+        return;
+      }
+
+      // Устанавливаем флаг, что верификация выполняется
+      setVerificationAttempted(true);
+      
       try {
-        // Если верификация уже выполнялась, не повторяем
-        if (verificationAttempted) return;
-        
-        setVerificationAttempted(true);
+        console.log('Выполняем запрос верификации для токена:', token);
         const response = await api.get(`/verify-email?token=${token}`);
         
         if (response.status === 200) {
-          setStatus('success');
+          console.log('Верификация успешна:', response.data);
           
-          // Сохраняем токен как обработанный
+          // Сохраняем токен как обработанный, чтобы избежать повторных запросов
           localStorage.setItem('processedVerificationToken', token);
           
-          // Сохраняем полученный токен и устанавливаем в API
-          const { access_token } = response.data;
-          if (access_token) {
-            localStorage.setItem('accessToken', access_token);
-            api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-            
-            // Инициализируем состояние авторизации
-            await initializeAuth();
+          // Используем новую функцию обработки подтверждения email
+          const result = await handleEmailVerification(response.data);
+          
+          if (result.success) {
+            setStatus('success');
             
             // Показываем уведомление об успешном подтверждении
             toast.success('Email успешно подтвержден! Переходим в ваш профиль через 5 секунд.', {
@@ -108,6 +116,10 @@ const VerifyEmailPage = () => {
             
             // Начинаем обратный отсчет для редиректа
             startRedirectCountdown();
+          } else {
+            // Если произошла ошибка при обработке подтверждения, устанавливаем статус ошибки
+            setStatus('error');
+            setError(result.error || 'Ошибка при обработке подтверждения email');
           }
         }
       } catch (err) {
@@ -120,10 +132,12 @@ const VerifyEmailPage = () => {
           
           if (errorDetail.includes('expired')) {
             setStatus('expired');
+            setError('Срок действия токена истек. Пожалуйста, запросите новую ссылку для подтверждения.');
           } else if (errorDetail.includes('Invalid verification token') || 
                      errorDetail.includes('already been verified')) {
             // Токен уже был использован или недействительный
             setStatus('already_verified');
+            setError('Токен уже был использован или недействителен. Пожалуйста, войдите в систему.');
             
             // Показываем сообщение о необходимости входа
             toast.info('Токен уже подтвержден. Пожалуйста, войдите в систему.', {
@@ -171,17 +185,24 @@ const VerifyEmailPage = () => {
         
         if (count <= 0) {
           clearInterval(interval);
-          // Перенаправляем на профиль
-          navigate('/profile');
+          // Проверяем, аутентифицирован ли пользователь
+          const isAuth = useAuthStore.getState().isAuthenticated;
+          if (isAuth) {
+            console.log('Пользователь авторизован, перенаправляем на страницу профиля');
+            navigate('/profile');
+          } else {
+            console.log('Пользователь не авторизован, перенаправляем на страницу входа');
+            navigate('/login');
+          }
         }
       }, 1000);
     };
 
-    // Запускаем верификацию токена только если он есть
-    if (token) {
+    // Запускаем верификацию токена только если он есть и верификация еще не выполнялась
+    if (token && !verificationAttempted) {
       verifyToken();
     }
-  }, [token, verificationAttempted, navigate, initializeAuth, pendingVerificationEmail]);
+  }, [token, navigate, initializeAuth, pendingVerificationEmail, verificationAttempted, handleEmailVerification, isAuthenticated]);
 
   // Функция для перехода на страницу входа
   const goToLogin = () => {

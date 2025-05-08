@@ -68,14 +68,6 @@ function AuthPage() {
       registrationCompleted
     });
 
-    // Если была успешная регистрация с требованием подтверждения email
-    if (registrationCompleted && pendingVerificationEmail) {
-      console.log('AuthPage: Registration completed, redirecting to verify-email page');
-      setRegistrationCompleted(false); // Сбрасываем флаг после перенаправления
-      navigate('/verify-email');
-      return;
-    }
-
     // Проверяем все необходимые условия для редиректа на главную
     const shouldRedirect = 
       isAuthenticated && // Пользователь аутентифицирован
@@ -96,7 +88,7 @@ function AuthPage() {
         hasToken: !!useAuthStore.getState().token
       });
     }
-  }, [isAuthenticated, user, authError, isAuthLoading, navigate, pendingVerificationEmail, registrationCompleted]);
+  }, [isAuthenticated, user, authError, isAuthLoading, navigate, pendingVerificationEmail]);
 
   // Сброс ошибки при смене пути
   useEffect(() => {
@@ -196,8 +188,9 @@ function AuthPage() {
       // Проверяем, требуется ли подтверждение email
       if (result && result.requiresEmailVerification) {
         console.log('AuthPage: Registration successful, email verification required');
-        // Устанавливаем флаг завершения регистрации для перенаправления на страницу подтверждения
-        setRegistrationCompleted(true);
+        // Вместо установки флага для перенаправления на страницу подтверждения,
+        // сразу перенаправляем на домашнюю страницу
+        navigate('/');
       } else if (useAuthStore.getState().isAuthenticated) {
         console.log('AuthPage: Registration successful, user authenticated');
         // Редирект произойдет автоматически через useEffect с isAuthenticated

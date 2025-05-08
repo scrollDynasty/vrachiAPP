@@ -489,7 +489,102 @@ const useAuthStore = create((set, get) => ({
     localStorage.removeItem(TOKEN_STORAGE_KEY); // Удаляем токен из Local Storage
     localStorage.removeItem(USER_STORAGE_KEY); // Удаляем данные пользователя из Local Storage
     // Сбрасываем состояние стора в исходное неавторизованное состояние
-    set({ token: null, user: null, isAuthenticated: false, isLoading: false, error: null }); // Сбрасываем ошибку
+    set({ token: null, user: null, isAuthenticated: false, isLoading: false, error: null, pendingVerificationEmail: null }); // Сбрасываем ошибку и pendingVerificationEmail
+  },
+
+  // Функция для обработки подтверждения email
+  handleEmailVerification: async (tokenData) => {
+    console.log("handleEmailVerification: Processing email verification with token data:", tokenData);
+    set({ isLoading: true, error: null });
+    
+    try {
+      // Проверяем наличие токена доступа в данных
+      if (!tokenData || !tokenData.access_token) {
+        throw new Error("Токен доступа отсутствует в ответе сервера");
+      }
+      
+      const accessToken = tokenData.access_token;
+      console.log("handleEmailVerification: Received access token after verification");
+      
+      // Сохраняем токен и настраиваем axios
+      localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
+      setAuthToken(accessToken);
+      
+      // Получаем данные пользователя
+      console.log("handleEmailVerification: Getting user data");
+      const userResponse = await api.get('/users/me');
+      const user = userResponse.data;
+      
+      // Сохраняем данные пользователя
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      
+      // Очищаем pendingVerificationEmail, так как email уже подтвержден
+      // и устанавливаем флаг аутентификации
+      set({ 
+        token: accessToken, 
+        user, 
+        isAuthenticated: true, 
+        isLoading: false, 
+        error: null,
+        pendingVerificationEmail: null
+      });
+      
+      console.log("handleEmailVerification: Authentication successful after email verification");
+      
+      // Проверяем, сохранены ли данные профиля в localStorage
+      const storedProfileData = localStorage.getItem('vrach_registration_profile');
+      if (storedProfileData && user.role === 'patient') {
+        console.log('handleEmailVerification: Found patient profile data, attempting to create profile');
+        try {
+          const profileData = JSON.parse(storedProfileData);
+          await get().createOrUpdatePatientProfile(profileData);
+          // После успешного создания профиля, удаляем сохраненные данные
+          localStorage.removeItem('vrach_registration_profile');
+        } catch (profileError) {
+          console.error('handleEmailVerification: Error creating profile:', profileError);
+          // Не выбрасываем ошибку, так как основная функция (подтверждение email) выполнена успешно
+        }
+      }
+      
+      // Показываем уведомление об успехе
+      toast.success('Email успешно подтвержден!');
+      
+      return { success: true, user };
+    } catch (error) {
+      console.error("Email verification failed", error);
+      
+      // Определяем сообщение об ошибке
+      let errorMessage = "Не удалось завершить процесс подтверждения email. Пожалуйста, попробуйте позже.";
+      
+      if (error.response) {
+        // Если у нас есть ответ от сервера с ошибкой, обрабатываем его
+        const status = error.response.status;
+        const detail = error.response.data?.detail;
+        
+        if (detail) {
+          errorMessage = detail;
+        } else if (status === 400) {
+          errorMessage = "Недействительный или истекший токен подтверждения.";
+        } else if (status === 404) {
+          errorMessage = "Токен подтверждения не найден.";
+        }
+      }
+      
+      // Показываем уведомление об ошибке
+      toast.error(errorMessage);
+      
+      // Обновляем состояние с ошибкой, но не сбрасываем pendingVerificationEmail
+      // чтобы пользователь мог запросить новую ссылку
+      set({ 
+        token: null, 
+        user: null, 
+        isAuthenticated: false, 
+        isLoading: false, 
+        error: errorMessage
+      });
+      
+      return { success: false, error: errorMessage };
+    }
   },
 
   // Функция для обновления данных пользователя в сторе (например, после обновления профиля на бэкенде)

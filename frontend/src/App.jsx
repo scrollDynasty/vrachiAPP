@@ -104,17 +104,31 @@ function App() {
     }
     
     // Если есть ожидающий подтверждения email и мы не на странице подтверждения - перенаправляем туда
-    // ВАЖНО: Делаем это только если нет ошибки аутентификации
-    if (pendingVerificationEmail && !authError && location.pathname !== '/verify-email') {
-      console.log("App: User has pending email verification, redirecting to verify-email page");
+    // ВАЖНО: Делаем это только если нет ошибки аутентификации И ЕСЛИ путь не является домашней страницей
+    // Это позволит после регистрации попасть на домашнюю страницу вместо страницы верификации
+    if (pendingVerificationEmail && !authError && location.pathname !== '/verify-email' && 
+        location.pathname !== '/' && location.pathname !== '/login' && location.pathname !== '/register') {
+      console.log("App: User has pending email verification, but not redirecting from root path");
       navigate('/verify-email');
       return;
+    }
+    
+    // Если пользователь авторизован и находится на странице подтверждения email,
+    // и нет ожидающих подтверждений, перенаправляем на профиль
+    if (isAuthenticated && !isLoading && location.pathname === '/verify-email' && !pendingVerificationEmail) {
+      console.log("App: User is authenticated on verify-email page with no pending verifications, redirecting to profile");
+      navigate('/profile');
     }
     
     // Если путь не публичный, загрузка завершена и пользователь не авторизован - перенаправляем на логин
     if (!isPublicRoute && !isLoading && !isAuthenticated) {
       console.log("App: User not authenticated, redirecting to login page");
-      navigate('/login');
+      // Добавляем проверку, чтобы не перенаправлять, если мы на странице подтверждения email
+      if (location.pathname !== '/verify-email') {
+        navigate('/login');
+      } else {
+        console.log("App: On verify-email page, not redirecting despite being unauthenticated");
+      }
     } 
   }, [isLoading, isAuthenticated, navigate, location.pathname, error, pendingVerificationEmail]);
 
