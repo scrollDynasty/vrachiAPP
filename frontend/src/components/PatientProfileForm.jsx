@@ -364,10 +364,13 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    const handleNotificationsSave = async () => {
       setIsLoadingNotificationSettings(true);
       try {
+         // Получаем свежий CSRF-токен перед отправкой
+         const freshTokenResponse = await api.get('/csrf-token');
+         const freshToken = freshTokenResponse.data.csrf_token;
+         
          // Отправляем запрос на обновление настроек с CSRF токеном
          await notificationsApi.updateNotificationSettings({
-            csrf_token: csrfToken,
-            email_notifications: emailNotifications,
+            csrf_token: freshToken,
             push_notifications: pushNotifications,
             appointment_reminders: appointmentReminders
          });
@@ -386,8 +389,8 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
          setNotificationsModalOpen(false);
          
          // Получаем новый CSRF токен после успешной операции
-         const response = await api.get('/csrf-token');
-         setCsrfToken(response.data.csrf_token);
+         const newToken = await getCsrfToken();
+         setCsrfToken(newToken);
       } catch (error) {
          console.error('Ошибка при сохранении настроек уведомлений:', error);
          toast.error('Не удалось сохранить настройки. Попробуйте позже', {
@@ -853,19 +856,6 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                <ModalHeader>Настройки уведомлений</ModalHeader>
                <ModalBody>
                   <div className="space-y-4">
-                     <div className="flex justify-between items-center">
-                        <div>
-                           <h3 className="text-medium">Email уведомления</h3>
-                           <p className="text-small text-default-500">Получать уведомления на почту</p>
-                        </div>
-                        <Switch 
-                           isSelected={emailNotifications}
-                           onValueChange={setEmailNotifications}
-                           color="primary"
-                           isDisabled={isLoadingNotificationSettings}
-                        />
-                     </div>
-                     
                      <div className="flex justify-between items-center">
                         <div>
                            <h3 className="text-medium">Push-уведомления</h3>

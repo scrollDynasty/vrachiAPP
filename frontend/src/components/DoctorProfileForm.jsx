@@ -4,6 +4,7 @@ import { Input, Button, Spinner, Textarea, Card, CardBody, Divider, Modal, Modal
 import { toast } from 'react-toastify';
 import { motion } from 'framer-motion';
 import api, { getCsrfToken } from '../api';
+import { notificationsApi } from '../api';
 
 // Компонент формы для профиля Врача
 // Используется на странице ProfileSettingsPage для создания или редактирования профиля Врача.
@@ -37,6 +38,8 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    const [emailNotifications, setEmailNotifications] = useState(true);
    const [pushNotifications, setPushNotifications] = useState(true);
    const [appointmentReminders, setAppointmentReminders] = useState(true);
+   const [isNotificationsModalOpen, setNotificationsModalOpen] = useState(false);
+   const [isLoadingNotificationSettings, setIsLoadingNotificationSettings] = useState(false);
 
    // Состояние для CSRF-токена
    const [csrfToken, setCsrfToken] = useState('');
@@ -90,6 +93,19 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
       };
       
       fetchCsrfToken();
+
+      // Загрузка настроек уведомлений
+      const fetchNotificationSettings = async () => {
+         try {
+            const settings = await notificationsApi.getNotificationSettings();
+            setPushNotifications(settings.push_notifications);
+            setAppointmentReminders(settings.appointment_reminders);
+         } catch (error) {
+            console.error('Ошибка при загрузке настроек уведомлений:', error);
+         }
+      };
+      
+      fetchNotificationSettings();
    }, []);
 
    // Обработчик отправки формы (пустая функция, так как редактирование всех полей запрещено)
@@ -355,6 +371,48 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
       }
    };
 
+   // Добавляем обработчик сохранения настроек уведомлений
+   const handleNotificationsSave = async () => {
+      setIsLoadingNotificationSettings(true);
+      try {
+         // Получаем свежий CSRF-токен перед отправкой
+         const freshTokenResponse = await api.get('/csrf-token');
+         const freshToken = freshTokenResponse.data.csrf_token;
+         
+         // Отправляем запрос на обновление настроек с CSRF токеном
+         await notificationsApi.updateNotificationSettings({
+            csrf_token: freshToken,
+            push_notifications: pushNotifications,
+            appointment_reminders: appointmentReminders
+         });
+         
+         // Показываем уведомление об успешном сохранении
+         toast.success('Настройки уведомлений сохранены', {
+            position: 'top-right',
+            autoClose: 3000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true
+         });
+         
+         // Закрываем модальное окно
+         setNotificationsModalOpen(false);
+         
+         // Получаем новый CSRF токен после успешной операции
+         const newToken = await getCsrfToken();
+         setCsrfToken(newToken);
+      } catch (error) {
+         console.error('Ошибка при сохранении настроек уведомлений:', error);
+         toast.error('Не удалось сохранить настройки. Попробуйте позже', {
+            position: 'top-right',
+            autoClose: 3000
+         });
+      } finally {
+         setIsLoadingNotificationSettings(false);
+      }
+   };
+
    return (
       <div className="w-full max-w-5xl mx-auto">
          {/* Сообщение об ошибке */}
@@ -477,9 +535,17 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                               </svg>
                               <h3 className="text-medium font-semibold">Уведомления</h3>
                            </div>
-                           <p className="text-sm text-gray-500 mb-4">Управление email и push-уведомлениями</p>
+                           <p className="text-sm text-gray-500 mb-4">Управление уведомлениями и напоминаниями</p>
                            <div className="mt-auto">
-                              {/* Удаляем кнопку настроек уведомлений */}
+                              <Button 
+                                 color="primary"
+                                 variant="flat"
+                                 className="w-full text-sm"
+                                 size="sm"
+                                 onClick={() => setNotificationsModalOpen(true)}
+                              >
+                                 Настройки уведомлений
+                              </Button>
                            </div>
                         </div>
                      </CardBody>
@@ -660,6 +726,50 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                   <Button color="danger" onClick={handleDeleteAccount}>
                      Удалить аккаунт
              </Button>
+               </ModalFooter>
+            </ModalContent>
+         </Modal>
+         
+         {/* Модальное окно настроек уведомлений */}
+         <Modal isOpen={isNotificationsModalOpen} onClose={() => !isLoadingNotificationSettings && setNotificationsModalOpen(false)}>
+            <ModalContent>
+               <ModalHeader>Настройки уведомлений</ModalHeader>
+               <ModalBody>
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Push-уведомления</h3>
+                           <p className="text-small text-default-500">Получать уведомления в браузере</p>
+                        </div>
+                        <Switch 
+                           isSelected={pushNotifications}
+                           onValueChange={setPushNotifications}
+                           color="primary"
+                           isDisabled={isLoadingNotificationSettings}
+                        />
+                     </div>
+                     
+                     <div className="flex justify-between items-center">
+                        <div>
+                           <h3 className="text-medium">Напоминания о консультациях</h3>
+                           <p className="text-small text-default-500">Получать напоминания о предстоящих консультациях</p>
+                        </div>
+                        <Switch 
+                           isSelected={appointmentReminders}
+                           onValueChange={setAppointmentReminders}
+                           color="primary"
+                           isDisabled={isLoadingNotificationSettings}
+                        />
+                     </div>
+                  </div>
+               </ModalBody>
+               <ModalFooter>
+                  <Button color="default" variant="light" onClick={() => setNotificationsModalOpen(false)} isDisabled={isLoadingNotificationSettings}>
+                     Отмена
+                  </Button>
+                  <Button color="primary" onClick={handleNotificationsSave} isLoading={isLoadingNotificationSettings}>
+                     Сохранить
+                  </Button>
                </ModalFooter>
             </ModalContent>
          </Modal>
