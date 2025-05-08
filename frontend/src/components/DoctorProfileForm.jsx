@@ -26,7 +26,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
    // Состояние для модальных окон
    const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
    const [isPrivacyModalOpen, setPrivacyModalOpen] = useState(false);
-   const [isDeleteAccountModalOpen, setDeleteAccountModalOpen] = useState(false);
    
    const [isGoogleAccount, setIsGoogleAccount] = useState(false);
    const [currentPassword, setCurrentPassword] = useState('');
@@ -371,28 +370,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
       }
    };
    
-   // Удаление аккаунта
-   const handleDeleteAccount = () => {
-      // Здесь будет логика удаления аккаунта
-      toast.error('Аккаунт был удален', {
-         position: 'top-right',
-         autoClose: 3000,
-         hideProgressBar: false,
-         closeOnClick: true,
-         pauseOnHover: true,
-         draggable: true
-      });
-      setDeleteAccountModalOpen(false);
-   };
-
-   // Функция для закрытия модального окна смены пароля
-   const closePasswordModal = () => {
-      if (!isChangingPassword) {
-         setPasswordModalOpen(false);
-         setPasswordError(null);
-      }
-   };
-
    // Добавляем обработчик сохранения настроек уведомлений
    const handleNotificationsSave = async () => {
       setIsLoadingNotificationSettings(true);
@@ -459,6 +436,14 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
          });
       } finally {
          setIsLoadingNotificationSettings(false);
+      }
+   };
+
+   // Функция для закрытия модального окна смены пароля
+   const closePasswordModal = () => {
+      if (!isChangingPassword) {
+         setPasswordModalOpen(false);
+         setPasswordError(null);
       }
    };
 
@@ -599,32 +584,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                         </div>
                      </CardBody>
                   </Card>
-                  
-                  {/* Удаление аккаунта */}
-                  <Card className="shadow-sm hover:shadow-md transition-shadow">
-                     <CardBody className="p-4">
-                        <div className="flex flex-col h-full">
-                           <div className="mb-3 flex items-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                              <h3 className="text-medium font-semibold">Удаление аккаунта</h3>
-                           </div>
-                           <p className="text-sm text-gray-500 mb-4">Полное удаление вашего аккаунта</p>
-                           <div className="mt-auto">
-                              <Button 
-                                 color="danger"
-                                 variant="flat"
-                                 className="w-full text-sm"
-                                 size="sm"
-                                 onClick={() => setDeleteAccountModalOpen(true)}
-                              >
-                                 Удалить аккаунт
-                              </Button>
-                           </div>
-                        </div>
-                     </CardBody>
-                  </Card>
                </div>
                
                {/* Правая колонка - форма профиля */}
@@ -754,27 +713,6 @@ function DoctorProfileForm({ profile, onSave, isLoading, error }) {
                   >
                      Изменить пароль
                   </Button>
-               </ModalFooter>
-            </ModalContent>
-         </Modal>
-         
-         {/* Модальное окно для удаления аккаунта */}
-         <Modal isOpen={isDeleteAccountModalOpen} onClose={() => setDeleteAccountModalOpen(false)}>
-            <ModalContent>
-               <ModalHeader>Удаление аккаунта</ModalHeader>
-               <ModalBody>
-                  <div className="bg-danger-50 text-danger p-4 rounded-lg mb-4">
-                     <p className="font-medium">Внимание! Это действие необратимо.</p>
-                  </div>
-                  <p>Вы уверены, что хотите удалить свой аккаунт? Все ваши данные будут безвозвратно удалены.</p>
-               </ModalBody>
-               <ModalFooter>
-                  <Button variant="flat" onClick={() => setDeleteAccountModalOpen(false)}>
-                     Отмена
-                  </Button>
-                  <Button color="danger" onClick={handleDeleteAccount}>
-                     Удалить аккаунт
-             </Button>
                </ModalFooter>
             </ModalContent>
          </Modal>

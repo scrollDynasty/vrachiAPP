@@ -452,17 +452,57 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
    };
 
    // Добавляем обработчик удаления аккаунта
-   const handleDeleteAccount = () => {
-      // Здесь будет логика удаления аккаунта
-      toast.error('Аккаунт был удален', {
-         position: 'top-right',
-         autoClose: 3000,
-         hideProgressBar: false,
-         closeOnClick: true,
-         pauseOnHover: true,
-         draggable: true
-      });
-      setDeleteAccountModalOpen(false);
+   const handleDeleteAccount = async () => {
+      try {
+         // Получаем свежий CSRF-токен перед отправкой
+         const freshTokenResponse = await api.get('/csrf-token');
+         const freshToken = freshTokenResponse.data.csrf_token;
+         
+         // Отправляем запрос на удаление аккаунта
+         await api.post('/users/me/delete-account', {
+            csrf_token: freshToken,
+            confirmation: 'удалить' // Подтверждение с фронтенда
+         });
+         
+         // Показываем уведомление об успешном удалении
+         toast.success('Аккаунт успешно удален', {
+            position: 'top-right',
+            autoClose: 3000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true
+         });
+         
+         // Закрываем модальное окно
+         setDeleteAccountModalOpen(false);
+         
+         // Удаляем токен из localStorage
+         localStorage.removeItem('token');
+         localStorage.removeItem('profileImage');
+         sessionStorage.clear();
+         
+         // Перенаправляем на страницу логина
+         window.location.href = '/login';
+      } catch (error) {
+         console.error('Ошибка при удалении аккаунта:', error);
+         
+         // Показываем сообщение об ошибке
+         let errorMessage = 'Не удалось удалить аккаунт. Попробуйте позже.';
+         
+         if (error.response && error.response.data) {
+            if (typeof error.response.data === 'string') {
+               errorMessage = `Ошибка: ${error.response.data}`;
+            } else if (error.response.data.detail) {
+               errorMessage = `Ошибка: ${error.response.data.detail}`;
+            }
+         }
+         
+         toast.error(errorMessage, {
+            position: 'top-right',
+            autoClose: 5000
+         });
+      }
    };
 
    return (
@@ -797,21 +837,6 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                      Настройка уведомлений
                   </Button>
                   
-                  {/* Кнопка настроек приватности */}
-                  <Button
-                     color="default"
-                     variant="light"
-                     startContent={
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                     }
-                     onClick={() => setPrivacyModalOpen(true)}
-                     className="justify-start transform transition-transform hover:scale-105"
-                  >
-                     Настройки приватности
-                  </Button>
-                  
                   {/* Кнопка удаления аккаунта */}
              <Button
                      color="danger"
@@ -821,7 +846,7 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                      }
-                     onClick={handleDeleteAccount}
+                     onClick={() => setDeleteAccountModalOpen(true)}
                      className="justify-start transform transition-transform hover:scale-105"
                   >
                      Удалить аккаунт
@@ -943,48 +968,6 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
             </ModalContent>
          </Modal>
          
-         {/* Модальное окно настроек приватности */}
-         <Modal isOpen={isPrivacyModalOpen} onClose={() => setPrivacyModalOpen(false)}>
-            <ModalContent>
-               <ModalHeader className="flex flex-col gap-1">
-                  <h2 className="text-xl text-primary">Настройки приватности</h2>
-               </ModalHeader>
-               <ModalBody>
-                  <div className="space-y-4">
-                     <div className="flex justify-between items-center">
-                        <div>
-                           <h3 className="text-medium">Видимость профиля</h3>
-                           <p className="text-small text-default-500">Видимость вашего профиля для других пользователей</p>
-                        </div>
-                        <Switch 
-                           defaultSelected
-                           color="primary"
-                        />
-                     </div>
-                     
-                     <div className="flex justify-between items-center">
-                        <div>
-                           <h3 className="text-medium">Доступ к медицинской информации</h3>
-                           <p className="text-small text-default-500">Разрешить врачам видеть вашу медицинскую информацию</p>
-                        </div>
-                        <Switch 
-                           defaultSelected
-                           color="primary"
-                        />
-                     </div>
-                  </div>
-               </ModalBody>
-               <ModalFooter>
-                  <Button color="default" variant="light" onClick={() => setPrivacyModalOpen(false)}>
-                     Отмена
-                  </Button>
-                  <Button color="primary" onClick={() => setPrivacyModalOpen(false)}>
-                     Сохранить
-                  </Button>
-               </ModalFooter>
-            </ModalContent>
-         </Modal>
-         
          {/* Модальное окно удаления аккаунта */}
          <Modal isOpen={isDeleteAccountModalOpen} onClose={() => setDeleteAccountModalOpen(false)}>
             <ModalContent>
@@ -1007,15 +990,29 @@ const PatientProfileForm = ({ profile, onSave, isLoading, error }) => {
                      label="Для подтверждения введите 'удалить'"
                      placeholder="удалить"
                      variant="bordered"
+                     id="delete-confirmation"
                   />
                </ModalBody>
                <ModalFooter>
                   <Button color="default" variant="light" onClick={() => setDeleteAccountModalOpen(false)}>
                      Отмена
                   </Button>
-                  <Button color="danger" onClick={handleDeleteAccount}>
+                  <Button 
+                     color="danger" 
+                     onClick={() => {
+                        const confirmation = document.getElementById('delete-confirmation').value;
+                        if (confirmation === 'удалить') {
+                           handleDeleteAccount();
+                        } else {
+                           toast.error('Пожалуйста, введите слово "удалить" для подтверждения', {
+                              position: 'top-right',
+                              autoClose: 3000
+                           });
+                        }
+                     }}
+                  >
                      Удалить аккаунт
-             </Button>
+                  </Button>
                </ModalFooter>
             </ModalContent>
          </Modal>

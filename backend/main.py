@@ -2891,3 +2891,55 @@ def check_email_exists(email_data: dict, db: DbDependency):
         "exists": False,
         "auth_provider": None
     }
+
+# Модель для запроса на удаление аккаунта с CSRF защитой
+class DeleteAccountRequest(CsrfProtectedRequest):
+    confirmation: str  # Строка подтверждения, должна быть равна "удалить"
+
+# Эндпоинт для удаления аккаунта пользователя
+@app.post("/users/me/delete-account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    delete_data: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Удаляет аккаунт текущего пользователя.
+    Требует CSRF токен и подтверждение "удалить".
+    """
+    # Проверяем, что пользователь не является врачом
+    if current_user.role == "doctor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Doctors cannot delete their accounts. Please contact support."
+        )
+    
+    # Проверяем CSRF токен
+    if not verify_csrf_token(current_user.id, delete_data.csrf_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired CSRF token"
+        )
+    
+    # Проверяем строку подтверждения
+    if delete_data.confirmation != "удалить":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation text does not match 'удалить'"
+        )
+    
+    # Явно удаляем настройки уведомлений пользователя до удаления самого пользователя
+    notification_settings = db.query(UserNotificationSettings).filter(
+        UserNotificationSettings.user_id == current_user.id
+    ).first()
+    if notification_settings:
+        db.delete(notification_settings)
+        db.commit()
+    
+    # Удаляем пользователя из базы данных
+    # Каскадное удаление связанных записей настроено в моделях (cascade="all, delete-orphan")
+    db.delete(current_user)
+    db.commit()
+    
+    # Возвращаем 204 No Content (успешно, но без тела ответа)
+    return None

@@ -65,10 +65,13 @@ class User(Base):
     doctor_profile = relationship("DoctorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     # Отношение к заявкам на роль врача
-    doctor_applications = relationship("DoctorApplication", back_populates="user")
+    doctor_applications = relationship("DoctorApplication", back_populates="user", cascade="all, delete-orphan")
     
     # Отношение к просмотренным уведомлениям
-    viewed_notifications = relationship("ViewedNotification", back_populates="user")
+    viewed_notifications = relationship("ViewedNotification", back_populates="user", cascade="all, delete-orphan")
+    
+    # Отношение к настройкам уведомлений
+    notification_settings = relationship("UserNotificationSettings", backref="user_ref", uselist=False, cascade="all, delete-orphan")
 
 
 # Модель профиля Пациента
@@ -161,7 +164,8 @@ class UserNotificationSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Отношение к пользователю
-    user = relationship("User", backref="notification_settings_rel")
+    # Это отношение удаляем, так как оно определено в модели User с cascade
+    # user = relationship("User", backref="notification_settings_rel")
 
 
 # Модель для хранения информации о просмотренных уведомлениях
