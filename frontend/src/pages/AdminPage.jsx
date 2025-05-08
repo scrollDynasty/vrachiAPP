@@ -56,31 +56,37 @@ function AdminPage() {
   // Данные пользователя из стора
   const { user } = useAuthStore();
   
-  // Загрузка заявок
-  useEffect(() => {
-    if (activeTab === 'applications') {
-      fetchApplications();
-    }
-  }, [page, selectedStatus, activeTab]);
+  // Добавляем состояния для общего количества пользователей и страниц
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [totalUsersPages, setTotalUsersPages] = useState(1);
   
-  // Загрузка пользователей
+  // Загружаем пользователей при первом переключении на вкладку
   useEffect(() => {
     if (activeTab === 'users') {
       fetchUsers();
     }
   }, [usersPage, activeTab]);
   
+  // Загружаем заявки при первом переключении на вкладку
+  useEffect(() => {
+    if (activeTab === 'applications') {
+      fetchApplications();
+    }
+  }, [page, selectedStatus, activeTab]);
+  
   // Функция для загрузки заявок
   const fetchApplications = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await api.get(`/admin/doctor-applications?page=${page}&size=10&status=${selectedStatus}`);
-      setApplications(response.data.items);
-      setTotalApplications(response.data.total);
+      
+      setApplications(response.data.items || response.data);
+      setTotalApplications(response.data.total || response.data.length);
       setLoading(false);
     } catch (err) {
-      console.error('Failed to fetch applications:', err);
-      setError('Ошибка при загрузке заявок. Пожалуйста, попробуйте позже.');
+      console.error('Ошибка при загрузке заявок:', err);
+      setError('Ошибка при загрузке заявок. Пожалуйста, проверьте подключение к серверу или обратитесь к администратору.');
       setLoading(false);
     }
   };
@@ -90,12 +96,22 @@ function AdminPage() {
     try {
       setUsersLoading(true);
       setUsersError(null);
+      
+      // Получаем список пользователей
       const response = await api.get(`/admin/users?page=${usersPage}&size=10`);
-      setUsers(response.data);
+      
+      // Получаем базовые данные пользователей
+      const usersData = response.data.items || response.data;
+      
+      // Устанавливаем полученные данные
+      setUsers(usersData);
+      setTotalUsers(response.data.total || response.data.length);
+      setTotalUsersPages(response.data.pages || Math.ceil(response.data.length / 10));
+      
       setUsersLoading(false);
     } catch (err) {
-      console.error('Failed to fetch users:', err);
-      setUsersError('Ошибка при загрузке пользователей. Пожалуйста, попробуйте позже.');
+      console.error('Ошибка при загрузке пользователей:', err);
+      setUsersError('Ошибка при загрузке пользователей. Пожалуйста, проверьте подключение к серверу или обратитесь к администратору.');
       setUsersLoading(false);
     }
   };
@@ -105,11 +121,12 @@ function AdminPage() {
     try {
       setUserProfileLoading(true);
       const response = await api.get(`/admin/users/${userId}/profile`);
+      
       setUserProfile(response.data);
       setUserProfileLoading(false);
     } catch (err) {
-      console.error('Failed to fetch user profile:', err);
-      setUserProfile({ message: 'Ошибка при загрузке профиля пользователя.' });
+      console.error('Ошибка при загрузке профиля пользователя:', err);
+      setUserProfile({ message: 'Ошибка при загрузке профиля пользователя. Пожалуйста, попробуйте позже.' });
       setUserProfileLoading(false);
     }
   };
@@ -240,6 +257,88 @@ function AdminPage() {
       default:
         return <Chip>{role}</Chip>;
     }
+  };
+  
+  // Функция рендера таблицы пользователей с информацией, которая доступна из API
+  const renderUsersTable = () => {
+    return (
+      <Table
+        aria-label="Таблица пользователей"
+        shadow="sm"
+        selectionMode="none"
+        color="primary"
+        isHeaderSticky
+        classNames={{
+          base: "max-h-[70vh]",
+          table: "min-h-[400px]",
+        }}
+      >
+        <TableHeader>
+          <TableColumn>ID</TableColumn>
+          <TableColumn>Email</TableColumn>
+          <TableColumn>Роль</TableColumn>
+          <TableColumn>Активен</TableColumn>
+          <TableColumn>Имя</TableColumn>
+          <TableColumn>Телефон</TableColumn>
+          <TableColumn>Район</TableColumn>
+          <TableColumn>Дата регистрации</TableColumn>
+          <TableColumn width={130}>Действия</TableColumn>
+        </TableHeader>
+        <TableBody
+          items={users}
+          isLoading={usersLoading}
+          loadingContent={<Spinner label="Загрузка пользователей..." />}
+          emptyContent="Пользователи не найдены"
+        >
+          {(user) => (
+            <TableRow key={user.id}>
+              <TableCell>{user.id}</TableCell>
+              <TableCell>{user.email || "-"}</TableCell>
+              <TableCell>{renderUserRole(user.role)}</TableCell>
+              <TableCell>
+                <Chip color={user.is_active ? "success" : "danger"} variant="flat">
+                  {user.is_active ? "Да" : "Нет"}
+                </Chip>
+              </TableCell>
+              <TableCell>{user.full_name || "-"}</TableCell>
+              <TableCell>{user.contact_phone || "-"}</TableCell>
+              <TableCell>{user.district || "-"}</TableCell>
+              <TableCell>{formatDate(user.created_at)}</TableCell>
+              <TableCell>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    color="primary"
+                    variant="flat"
+                    onPress={() => viewUserProfile(user)}
+                  >
+                    Подробнее
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    );
+  };
+  
+  // Обновляем рендер компонента Pagination в секции пользователей, чтобы использовать реальные данные
+  const renderUsersPagination = () => {
+    return (
+      <div className="flex justify-between items-center mt-4">
+        <span className="text-gray-500 text-sm">
+          Всего: {totalUsers} пользователей
+        </span>
+        <Pagination
+          showControls
+          total={totalUsersPages}
+          initialPage={usersPage}
+          page={usersPage}
+          onChange={setUsersPage}
+        />
+      </div>
+    );
   };
   
   return (
@@ -401,49 +500,8 @@ function AdminPage() {
                     </div>
                   ) : (
                     <>
-                      <Table aria-label="Список пользователей">
-                        <TableHeader>
-                          <TableColumn>ID</TableColumn>
-                          <TableColumn>Email</TableColumn>
-                          <TableColumn>Роль</TableColumn>
-                          <TableColumn>Статус</TableColumn>
-                          <TableColumn>Действия</TableColumn>
-                        </TableHeader>
-                        <TableBody>
-                          {users.map((user) => (
-                            <TableRow key={user.id}>
-                              <TableCell>{user.id}</TableCell>
-                              <TableCell>{user.email}</TableCell>
-                              <TableCell>{renderUserRole(user.role)}</TableCell>
-                              <TableCell>
-                                {user.is_active ? (
-                                  <Chip color="success" size="sm">Активен</Chip>
-                                ) : (
-                                  <Chip color="danger" size="sm">Не активен</Chip>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Button 
-                                  size="sm" 
-                                  color="primary" 
-                                  variant="flat"
-                                  onClick={() => viewUserProfile(user)}
-                                >
-                                  Профиль
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                      
-                      <div className="flex justify-center py-4">
-                        <Pagination
-                          total={10} // Заглушка, в реальном API нужно получать общее количество
-                          page={usersPage}
-                          onChange={setUsersPage}
-                        />
-                      </div>
+                      {renderUsersTable()}
+                      {renderUsersPagination()}
                     </>
                   )}
                 </div>
@@ -732,125 +790,162 @@ function AdminPage() {
       </Modal>
       
       {/* Модальное окно для просмотра профиля пользователя */}
-      <Modal isOpen={isUserModalOpen} onClose={onUserModalClose} size="2xl">
+      <Modal isOpen={isUserModalOpen} onClose={onUserModalClose} size="3xl">
         <ModalContent>
-          {(onUserModalClose) => (
+          {() => (
             <>
-              <ModalHeader className="flex flex-col gap-1">
-                Профиль пользователя
+              <ModalHeader>
+                <div className="flex flex-col">
+                  <span>Профиль пользователя</span>
+                  <span className="text-sm text-gray-500">ID: {selectedUser?.id}</span>
+                </div>
               </ModalHeader>
               <ModalBody>
-                {selectedUser && (
+                {userProfileLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Spinner label="Загрузка профиля..." />
+                  </div>
+                ) : (
                   <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-sm text-gray-500">ID пользователя</p>
-                        <p className="font-medium">{selectedUser.id}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Email</p>
-                        <p className="font-medium">{selectedUser.email}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Текущая роль</p>
-                        <div className="mt-1">{renderUserRole(selectedUser.role)}</div>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Статус активации</p>
-                        {selectedUser.is_active ? (
-                          <Chip color="success" size="sm">Активен</Chip>
-                        ) : (
-                          <Chip color="danger" size="sm">Не активен</Chip>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="border-t pt-4">
-                      <h4 className="font-medium text-lg mb-4">Изменить роль пользователя</h4>
-                      <div className="flex flex-col md:flex-row gap-4">
-                        <Select
-                          label="Новая роль"
-                          placeholder="Выберите роль"
-                          value={newRole}
-                          onChange={(e) => setNewRole(e.target.value)}
-                          className="md:w-1/2"
-                        >
-                          <SelectItem key="patient" value="patient">Пациент</SelectItem>
-                          <SelectItem key="doctor" value="doctor">Врач</SelectItem>
-                          <SelectItem key="admin" value="admin">Администратор</SelectItem>
-                        </Select>
-                        <Button 
-                          color="primary" 
-                          onClick={changeUserRole}
-                          isDisabled={usersLoading || selectedUser.role === newRole}
-                        >
-                          Сохранить изменения
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {userProfileLoading ? (
-                      <div className="flex justify-center items-center py-4">
-                        <Spinner size="md" />
-                      </div>
-                    ) : userProfile ? (
-                      <div className="border-t pt-4">
-                        <h4 className="font-medium text-lg mb-4">Профиль пользователя</h4>
-                        {userProfile.message ? (
-                          <p className="text-gray-500">{userProfile.message}</p>
-                        ) : (
+                    {/* Основная информация о пользователе */}
+                    <Card>
+                      <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <div className="flex justify-between items-center w-full">
+                          <h3 className="text-lg font-semibold">Основная информация</h3>
+                          {renderUserRole(selectedUser?.role)}
+                        </div>
+                      </CardHeader>
+                      <CardBody>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-500">Email</p>
+                            <p className="font-medium">{selectedUser?.email}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Статус</p>
+                            <Chip color={selectedUser?.is_active ? "success" : "danger"} variant="flat">
+                              {selectedUser?.is_active ? "Активен" : "Неактивен"}
+                            </Chip>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Дата регистрации</p>
+                            <p>{formatDate(selectedUser?.created_at)}</p>
+                          </div>
+                        </div>
+                      </CardBody>
+                    </Card>
+
+                    {/* Информация о профиле */}
+                    {userProfile && (
+                      <Card>
+                        <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                          <h3 className="text-lg font-semibold">Профиль пользователя</h3>
+                        </CardHeader>
+                        <CardBody>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {userProfile.full_name && (
-                              <div>
-                                <p className="text-sm text-gray-500">ФИО</p>
-                                <p className="font-medium">{userProfile.full_name}</p>
+                            {/* Общие поля для всех профилей */}
+                            <div>
+                              <p className="text-sm text-gray-500">Полное имя</p>
+                              <p className="font-medium">{userProfile.full_name || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Телефон</p>
+                              <p className="font-medium">{userProfile.contact_phone || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Район</p>
+                              <p>{userProfile.district || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Адрес</p>
+                              <p>{userProfile.contact_address || "-"}</p>
+                            </div>
+                            
+                            {/* Поля только для пациентов */}
+                            {selectedUser?.role === 'patient' && (
+                              <div className="col-span-2">
+                                <p className="text-sm text-gray-500">Медицинская информация</p>
+                                <p className="whitespace-pre-wrap bg-gray-50 p-2 rounded mt-1">
+                                  {userProfile.medical_info || "-"}
+                                </p>
                               </div>
                             )}
-                            {userProfile.contact_phone && (
-                              <div>
-                                <p className="text-sm text-gray-500">Телефон</p>
-                                <p className="font-medium">{userProfile.contact_phone}</p>
-                              </div>
-                            )}
-                            {userProfile.contact_address && (
-                              <div>
-                                <p className="text-sm text-gray-500">Адрес</p>
-                                <p className="font-medium">{userProfile.contact_address}</p>
-                              </div>
-                            )}
-                            {userProfile.specialization && (
-                              <div>
-                                <p className="text-sm text-gray-500">Специализация</p>
-                                <p className="font-medium">{userProfile.specialization}</p>
-                              </div>
-                            )}
-                            {userProfile.experience && (
-                              <div>
-                                <p className="text-sm text-gray-500">Опыт</p>
-                                <p className="font-medium">{userProfile.experience}</p>
-                              </div>
-                            )}
-                            {userProfile.education && (
-                              <div>
-                                <p className="text-sm text-gray-500">Образование</p>
-                                <p className="font-medium">{userProfile.education}</p>
-                              </div>
-                            )}
-                            {userProfile.practice_areas && (
-                              <div>
-                                <p className="text-sm text-gray-500">Районы практики</p>
-                                <p className="font-medium">{userProfile.practice_areas}</p>
-                              </div>
+                            
+                            {/* Поля только для врачей */}
+                            {selectedUser?.role === 'doctor' && (
+                              <>
+                                <div>
+                                  <p className="text-sm text-gray-500">Специализация</p>
+                                  <p className="font-medium">{userProfile.specialization || "-"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-500">Стоимость консультации</p>
+                                  <p className="font-medium">{userProfile.cost_per_consultation || "-"} ₽</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-500">Опыт работы</p>
+                                  <p>{userProfile.experience || "-"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-500">Верификация</p>
+                                  <Chip color={userProfile.is_verified ? "success" : "warning"} variant="flat">
+                                    {userProfile.is_verified ? "Верифицирован" : "Не верифицирован"}
+                                  </Chip>
+                                </div>
+                                <div className="col-span-2">
+                                  <p className="text-sm text-gray-500">Образование</p>
+                                  <p className="whitespace-pre-wrap bg-gray-50 p-2 rounded mt-1">
+                                    {userProfile.education || "-"}
+                                  </p>
+                                </div>
+                                <div className="col-span-2">
+                                  <p className="text-sm text-gray-500">Районы практики</p>
+                                  <p>{userProfile.practice_areas || "-"}</p>
+                                </div>
+                              </>
                             )}
                           </div>
-                        )}
-                      </div>
-                    ) : null}
+                        </CardBody>
+                      </Card>
+                    )}
+
+                    {/* Секция выбора роли */}
+                    <Card>
+                      <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <h3 className="text-lg font-semibold">Изменить роль пользователя</h3>
+                      </CardHeader>
+                      <CardBody>
+                        <div className="flex flex-col gap-4">
+                          <Select
+                            label="Выберите роль"
+                            selectedKeys={[newRole]}
+                            onChange={(e) => setNewRole(e.target.value)}
+                          >
+                            <SelectItem key="patient" value="patient">
+                              Пациент
+                            </SelectItem>
+                            <SelectItem key="doctor" value="doctor">
+                              Врач
+                            </SelectItem>
+                            <SelectItem key="admin" value="admin">
+                              Администратор
+                            </SelectItem>
+                          </Select>
+                          <Button
+                            color="primary"
+                            onClick={changeUserRole}
+                            disabled={selectedUser?.role === newRole || usersLoading}
+                          >
+                            Изменить роль
+                          </Button>
+                        </div>
+                      </CardBody>
+                    </Card>
                   </div>
                 )}
               </ModalBody>
               <ModalFooter>
-                <Button variant="flat" onPress={onUserModalClose}>
+                <Button color="danger" variant="light" onPress={onUserModalClose}>
                   Закрыть
                 </Button>
               </ModalFooter>
