@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 # Импорты для работы с JWT
-from jose import JWTError, jwt
+from jose import JWTError
+import jwt as pyjwt
 
 # Импорт для загрузки переменных окружения из .env файла
 from dotenv import load_dotenv
@@ -144,7 +145,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     # Кодируем payload в JWT токен, используя секретный ключ и алгоритм.
     # SECRET_KEY должен быть известен только серверу, который подписывает токены,
     # и серверам, которые их проверяют.
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = pyjwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
     return encoded_jwt
 
@@ -363,7 +364,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Se
     )
     try:
         # Декодируем JWT токен
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception

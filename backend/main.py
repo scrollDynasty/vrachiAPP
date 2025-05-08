@@ -13,7 +13,9 @@ from fastapi import (
     File,
     UploadFile,
     Form,
-)  # Добавляем BackgroundTasks для фоновых задач и Query для поиска
+    WebSocket,
+    WebSocketDisconnect,
+)  # Добавляем WebSocket и WebSocketDisconnect
 from fastapi.security import (
     OAuth2PasswordRequestForm,
     OAuth2PasswordBearer,
@@ -30,6 +32,7 @@ from pydantic import BaseModel, ValidationError  # Для моделей дан�
 from fastapi.staticfiles import StaticFiles  # Для раздачи статических файлов
 import secrets
 import time
+import jwt as pyjwt  # Импортируем PyJWT как pyjwt
 
 # Импортируем наши модели и функцию для получения сессии БД
 from models import (
@@ -48,7 +51,8 @@ from models import (
     Review,
     UserNotificationSettings,
     PendingUser,
-)  # Добавляем PendingUser
+    Notification,
+)  # Добавляем PendingUser и Notification
 
 # Импортируем функции для работы с паролями и JWT, а также зависимости для аутентификации и ролей
 # get_current_user и require_role используются как зависимости в эндпоинтах
@@ -1880,6 +1884,7 @@ async def mark_notification_viewed(
 # Модель для создания консультации
 class ConsultationCreate(BaseModel):
     doctor_id: int
+    patient_note: Optional[str] = None
 
 
 # Модель для ответа по консультации
@@ -1891,7 +1896,9 @@ class ConsultationResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    chat_time_limit: int
+    message_limit: int
+    message_count: int
+    patient_note: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -2008,7 +2015,9 @@ async def create_consultation(
         patient_id=current_user.id,
         doctor_id=consultation_data.doctor_id,
         status="pending",
-        chat_time_limit=5,  # 5 минут по умолчанию
+        message_limit=30,  # 30 сообщений по умолчанию
+        message_count=0,  # Начинаем с 0 сообщений
+        patient_note=consultation_data.patient_note  # Сохраняем сопроводительное письмо
     )
 
     db.add(new_consultation)
@@ -2177,18 +2186,7 @@ async def complete_consultation(
             detail=f"Невозможно завершить консультацию в статусе {consultation.status}",
         )
 
-    # Проверяем, не прошло ли 5 минут с начала консультации
-    if consultation.started_at:
-        time_elapsed = datetime.utcnow() - consultation.started_at
-        if time_elapsed > timedelta(minutes=consultation.chat_time_limit):
-            # Если прошло больше 5 минут, автоматически завершаем
-            consultation.status = "completed"
-            consultation.completed_at = datetime.utcnow()
-            db.commit()
-            db.refresh(consultation)
-            return consultation
-
-    # Если время не истекло, обновляем статус консультации
+    # Обновляем статус консультации
     consultation.status = "completed"
     consultation.completed_at = datetime.utcnow()
 
@@ -2212,6 +2210,7 @@ async def send_message(
 ):
     """
     Отправляет сообщение в чате консультации.
+    Учитывает лимит в 30 сообщений.
     """
     # Получаем консультацию
     consultation = (
@@ -2237,19 +2236,12 @@ async def send_message(
             detail="Отправка сообщений возможна только в активной консультации",
         )
 
-    # Проверяем, не истекло ли время консультации (5 минут)
-    if consultation.started_at:
-        time_elapsed = datetime.utcnow() - consultation.started_at
-        if time_elapsed > timedelta(minutes=consultation.chat_time_limit):
-            # Автоматически завершаем консультацию
-            consultation.status = "completed"
-            consultation.completed_at = datetime.utcnow()
-            db.commit()
-
-            raise HTTPException(
-                status_code=400,
-                detail=f"Время консультации (5 минут) истекло. Консультация автоматически завершена.",
-            )
+    # Проверяем лимит сообщений
+    if consultation.message_count >= consultation.message_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Достигнут лимит сообщений ({consultation.message_limit}). Необходимо продлить консультацию.",
+        )
 
     # Создаем новое сообщение
     new_message = Message(
@@ -2258,6 +2250,9 @@ async def send_message(
         content=message_data.content,
         is_read=False,
     )
+
+    # Увеличиваем счетчик сообщений
+    consultation.message_count += 1
 
     db.add(new_message)
     db.commit()
@@ -2352,15 +2347,6 @@ async def create_review(
             status_code=400,
             detail="Отзыв можно оставить только о завершенной консультации",
         )
-
-    # Проверяем, что отзыв оставляется в течение 5 минут после завершения консультации
-    if consultation.completed_at:
-        time_since_completion = datetime.utcnow() - consultation.completed_at
-        if time_since_completion > timedelta(minutes=5):
-            raise HTTPException(
-                status_code=400,
-                detail="Время для оставления отзыва истекло (5 минут после завершения консультации)",
-            )
 
     # Проверяем, нет ли уже отзыва о данной консультации
     existing_review = (
@@ -2943,3 +2929,453 @@ async def delete_account(
     
     # Возвращаем 204 No Content (успешно, но без тела ответа)
     return None
+
+# Класс для запроса продления консультации
+class ExtendConsultationRequest(BaseModel):
+    payment_info: Optional[str] = None  # В будущем здесь будет информация об оплате
+
+# Эндпоинт для продления консультации
+@app.post(
+    "/api/consultations/{consultation_id}/extend",
+    response_model=ConsultationResponse,
+    tags=["consultations"],
+)
+async def extend_consultation(
+    consultation_id: int,
+    extend_data: ExtendConsultationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Продлевает консультацию, добавляя еще 30 сообщений к лимиту.
+    В будущем здесь будет проверка оплаты.
+    """
+    # Получаем консультацию
+    consultation = (
+        db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    )
+
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+
+    # Проверяем права доступа (только пациент может продлить консультацию)
+    if current_user.id != consultation.patient_id:
+        raise HTTPException(
+            status_code=403, detail="Только пациент может продлить консультацию"
+        )
+
+    # Проверяем, что консультация активна или достигла лимита сообщений
+    if consultation.status != "active":
+        raise HTTPException(
+            status_code=400, detail="Продление возможно только для активной консультации"
+        )
+
+    # В будущем здесь будет проверка оплаты
+    # payment_result = check_payment(extend_data.payment_info)
+
+    # Добавляем 30 сообщений к лимиту
+    consultation.message_limit += 30
+
+    db.commit()
+    db.refresh(consultation)
+
+    return consultation
+
+# Эндпоинт для отправки уведомления пациенту о консультации
+@app.post(
+    "/api/consultations/{consultation_id}/notify",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["consultations"],
+)
+async def notify_about_consultation(
+    consultation_id: int,
+    message_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Отправляет уведомление участнику консультации.
+    """
+    # Получаем консультацию
+    consultation = (
+        db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    )
+
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+
+    # Проверяем права доступа
+    if (
+        current_user.id != consultation.patient_id
+        and current_user.id != consultation.doctor_id
+    ):
+        raise HTTPException(
+            status_code=403, detail="У вас нет доступа к этой консультации"
+        )
+
+    # Определяем получателя уведомления (если отправитель - врач, то получатель - пациент и наоборот)
+    recipient_id = consultation.patient_id if current_user.id == consultation.doctor_id else consultation.doctor_id
+    
+    # Создаем уведомление
+    notification = Notification(
+        user_id=recipient_id,
+        title="Обновление по консультации",
+        message=message_data.get("message", "Есть обновление по вашей консультации."),
+        type="consultation_update",
+        is_viewed=False
+    )
+    
+    db.add(notification)
+    db.commit()
+    
+    return None
+
+# Глобальное хранилище активных WebSocket соединений (user_id -> list of connections)
+active_websocket_connections = {}
+# Глобальное хранилище соединений для консультаций (consultation_id -> list of connections)
+consultation_websocket_connections = {}
+
+# WebSocket эндпоинт для чата консультаций
+@app.websocket("/ws/consultations/{consultation_id}")
+async def websocket_consultation_endpoint(
+    websocket: WebSocket, 
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    token: str = Query(None)
+):
+    # Проверяем авторизацию через токен
+    if token is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    
+    try:
+        # Валидация токена и получение пользователя
+        payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        user = db.query(User).filter(User.email == email).first()
+        if user is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        # Проверяем, имеет ли пользователь доступ к этой консультации
+        consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+        if consultation is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        if user.id != consultation.patient_id and user.id != consultation.doctor_id:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        # Принимаем WebSocket соединение
+        await websocket.accept()
+        
+        # Сохраняем соединение в глобальных словарях
+        if user.id not in active_websocket_connections:
+            active_websocket_connections[user.id] = []
+        active_websocket_connections[user.id].append(websocket)
+        
+        if consultation_id not in consultation_websocket_connections:
+            consultation_websocket_connections[consultation_id] = []
+        consultation_websocket_connections[consultation_id].append(websocket)
+        
+        # Ожидаем сообщения
+        try:
+            while True:
+                data = await websocket.receive_json()
+                
+                # Если это текстовое сообщение
+                if data.get("type") == "message":
+                    content = data.get("content")
+                    if not content:
+                        continue
+                    
+                    # Создаем новое сообщение
+                    new_message = Message(
+                        consultation_id=consultation_id,
+                        sender_id=user.id,
+                        content=content,
+                        is_read=False,
+                    )
+                    
+                    # Увеличиваем счетчик сообщений для контроля лимита
+                    # Только если отправитель - пациент (у врача нет лимита)
+                    if user.id == consultation.patient_id:
+                        consultation.message_count += 1
+                    
+                    db.add(new_message)
+                    db.commit()
+                    db.refresh(new_message)
+                    
+                    # Преобразуем сообщение в JSON для отправки
+                    message_data = {
+                        "id": new_message.id,
+                        "consultation_id": new_message.consultation_id,
+                        "sender_id": new_message.sender_id,
+                        "content": new_message.content,
+                        "sent_at": new_message.sent_at.isoformat(),
+                        "is_read": new_message.is_read
+                    }
+                    
+                    # Отправляем сообщение всем подключенным к консультации
+                    for conn in consultation_websocket_connections.get(consultation_id, []):
+                        try:
+                            await conn.send_json({"type": "new_message", "data": message_data})
+                        except:
+                            pass
+                
+                # Если это уведомление о прочтении сообщений
+                elif data.get("type") == "mark_read":
+                    # Обновляем статус сообщений как прочитанных
+                    # Получаем все непрочитанные сообщения, отправленные не этим пользователем
+                    unread_messages = (
+                        db.query(Message)
+                        .filter(
+                            Message.consultation_id == consultation_id,
+                            Message.sender_id != user.id,
+                            Message.is_read == False
+                        )
+                        .all()
+                    )
+                    
+                    for message in unread_messages:
+                        message.is_read = True
+                    
+                    db.commit()
+                    
+                    # Отправляем уведомление о прочтении сообщений
+                    for conn in consultation_websocket_connections.get(consultation_id, []):
+                        try:
+                            await conn.send_json({
+                                "type": "messages_read", 
+                                "reader_id": user.id,
+                                "consultation_id": consultation_id
+                            })
+                        except:
+                            pass
+                
+                # Если это уведомление об изменении статуса консультации
+                elif data.get("type") == "status_change" and user.id == consultation.doctor_id:
+                    new_status = data.get("status")
+                    if new_status in ["active", "completed"]:
+                        consultation.status = new_status
+                        if new_status == "completed":
+                            consultation.completed_at = datetime.utcnow()
+                        db.commit()
+                        
+                        # Отправляем уведомление об изменении статуса
+                        for conn in consultation_websocket_connections.get(consultation_id, []):
+                            try:
+                                await conn.send_json({
+                                    "type": "status_changed", 
+                                    "consultation_id": consultation_id,
+                                    "status": new_status,
+                                    "updated_at": datetime.utcnow().isoformat()
+                                })
+                            except:
+                                pass
+                
+        except WebSocketDisconnect:
+            # Удаляем соединение из списков при отключении
+            if user.id in active_websocket_connections and websocket in active_websocket_connections[user.id]:
+                active_websocket_connections[user.id].remove(websocket)
+                if not active_websocket_connections[user.id]:
+                    del active_websocket_connections[user.id]
+            
+            if consultation_id in consultation_websocket_connections and websocket in consultation_websocket_connections[consultation_id]:
+                consultation_websocket_connections[consultation_id].remove(websocket)
+                if not consultation_websocket_connections[consultation_id]:
+                    del consultation_websocket_connections[consultation_id]
+    
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        try:
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except:
+            pass
+
+
+# Функция для отправки уведомления пользователям через WebSocket
+async def broadcast_consultation_update(
+    consultation_id: int, 
+    update_data: dict
+):
+    """
+    Отправляет обновления всем пользователям, подключенным к определенной консультации.
+    """
+    if consultation_id in consultation_websocket_connections:
+        for connection in consultation_websocket_connections[consultation_id]:
+            try:
+                await connection.send_json(update_data)
+            except:
+                # Если возникла ошибка при отправке, пропускаем это соединение
+                pass
+
+# Обновленный эндпоинт для отправки сообщения (теперь с поддержкой WebSocket)
+@app.post(
+    "/api/consultations/{consultation_id}/messages",
+    response_model=MessageResponse,
+    tags=["consultations"],
+)
+async def send_message(
+    consultation_id: int,
+    message_data: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Отправляет сообщение в чате консультации.
+    Учитывает лимит сообщений для пациента (врач может отправлять без ограничений).
+    Также отправляет уведомление через WebSocket, если получатель подключен.
+    """
+    # Получаем консультацию
+    consultation = (
+        db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    )
+
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
+        raise HTTPException(
+            status_code=403, detail="У вас нет доступа к этой консультации"
+        )
+
+    # Проверяем, что консультация активна
+    if consultation.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="Отправка сообщений возможна только в активной консультации",
+        )
+
+    # Проверяем лимит сообщений только для пациента
+    if current_user.id == consultation.patient_id and consultation.message_count >= consultation.message_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Достигнут лимит сообщений ({consultation.message_limit}). Необходимо продлить консультацию.",
+        )
+
+    # Создаем новое сообщение
+    new_message = Message(
+        consultation_id=consultation_id,
+        sender_id=current_user.id,
+        content=message_data.content,
+        is_read=False,
+    )
+
+    # Увеличиваем счетчик сообщений, только если отправитель - пациент
+    if current_user.id == consultation.patient_id:
+        consultation.message_count += 1
+
+    db.add(new_message)
+    db.commit()
+    db.refresh(new_message)
+
+    # Преобразуем сообщение в формат для отправки через WebSocket
+    message_data = {
+        "type": "new_message",
+        "data": {
+            "id": new_message.id,
+            "consultation_id": new_message.consultation_id,
+            "sender_id": new_message.sender_id,
+            "content": new_message.content,
+            "sent_at": new_message.sent_at.isoformat(),
+            "is_read": new_message.is_read
+        }
+    }
+
+    # Отправка уведомления через WebSocket всем подключенным участникам консультации
+    if consultation_id in consultation_websocket_connections:
+        for connection in consultation_websocket_connections[consultation_id]:
+            try:
+                await connection.send_json(message_data)
+            except:
+                # Если возникла ошибка при отправке, пропускаем
+                pass
+
+    return new_message
+
+# Обновленный эндпоинт завершения консультации с WebSocket-уведомлениями
+@app.post(
+    "/api/consultations/{consultation_id}/complete",
+    response_model=ConsultationResponse,
+    tags=["consultations"],
+)
+async def complete_consultation(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Завершает консультацию и отправляет уведомление через WebSocket.
+    """
+    # Получаем консультацию
+    consultation = (
+        db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    )
+
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+
+    # Проверяем права доступа
+    if (
+        current_user.id != consultation.patient_id
+        and current_user.id != consultation.doctor_id
+    ):
+        raise HTTPException(
+            status_code=403, detail="У вас нет доступа к этой консультации"
+        )
+
+    # Проверяем, что консультация в статусе active
+    if consultation.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Невозможно завершить консультацию в статусе {consultation.status}",
+        )
+
+    # Обновляем статус консультации
+    consultation.status = "completed"
+    consultation.completed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(consultation)
+
+    # Отправляем уведомление через WebSocket
+    update_data = {
+        "type": "status_changed",
+        "consultation_id": consultation_id,
+        "status": "completed",
+        "updated_at": consultation.completed_at.isoformat()
+    }
+    
+    if consultation_id in consultation_websocket_connections:
+        for connection in consultation_websocket_connections[consultation_id]:
+            try:
+                await connection.send_json(update_data)
+            except:
+                # Если возникла ошибка при отправке, пропускаем
+                pass
+
+    return consultation
+
+# Эндпоинт для получения публичного профиля Пациента по ID пользователя Пациента. Не требует авторизации.
+@app.get("/patients/{user_id}/profile", response_model=PatientProfileResponse)
+def read_patient_profile_by_user_id(user_id: int, db: DbDependency):
+    """
+    Получить публичный профиль Пациента по ID пользователя Пациента.
+    Доступно без авторизации (пока).
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role != "patient":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User is not a patient or their profile is not public")
+    profile = db.query(PatientProfile).filter(PatientProfile.user_id == user.id).first()
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient profile not found for this user")
+    return profile

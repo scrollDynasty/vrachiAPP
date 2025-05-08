@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, CardBody, Button, Divider, Spinner, Chip, Tooltip } from '@nextui-org/react';
+import { Card, CardBody, Button, Divider, Spinner, Chip, Tooltip, Avatar, Pagination } from '@nextui-org/react';
 import { doctorsApi } from '../api';
 import useAuthStore from '../stores/authStore';
+import RequestConsultationModal from '../components/RequestConsultationModal';
+import api from '../api';
 
 // Компонент для секции информации в профиле
 const InfoSection = ({ title, children }) => (
@@ -11,6 +13,55 @@ const InfoSection = ({ title, children }) => (
     <div className="pl-2">{children}</div>
   </div>
 );
+
+// Компонент для отображения звездного рейтинга
+const StarRating = ({ rating }) => {
+  return (
+    <div className="flex items-center">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <span key={star} className={`text-2xl ${star <= rating ? 'text-yellow-500' : 'text-gray-300'}`}>
+          ★
+        </span>
+      ))}
+      <span className="ml-2 text-lg font-semibold">{rating.toFixed(1)}</span>
+    </div>
+  );
+};
+
+// Компонент для отзыва
+const ReviewItem = ({ review }) => {
+  // Преобразуем дату в читаемый формат
+  const formatDate = (dateString) => {
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    return new Date(dateString).toLocaleDateString('ru-RU', options);
+  };
+
+  return (
+    <Card className="mb-4 shadow-sm">
+      <CardBody>
+        <div className="flex items-start gap-4">
+          <Avatar size="md" src="/assets/patient-avatar.png" />
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="font-semibold">{review.patientName || 'Пациент'}</h4>
+              <span className="text-sm text-gray-500">
+                {formatDate(review.created_at)}
+              </span>
+            </div>
+            <div className="mb-2">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <span key={star} className={`text-xl ${star <= review.rating ? 'text-yellow-500' : 'text-gray-300'}`}>
+                  ★
+                </span>
+              ))}
+            </div>
+            <p className="text-gray-700">{review.comment || 'Отзыв без комментария'}</p>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+};
 
 // Компонент страницы профиля врача
 function DoctorProfilePage() {
@@ -22,6 +73,19 @@ function DoctorProfilePage() {
   const [doctor, setDoctor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isConsultationModalOpen, setIsConsultationModalOpen] = useState(false);
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [reviewsError, setReviewsError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const reviewsPerPage = 5;
+  
+  // Рассчитываем общий рейтинг врача
+  const calculateRating = (reviews) => {
+    if (!reviews || reviews.length === 0) return 0;
+    const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+    return totalRating / reviews.length;
+  };
   
   // Проверяем, может ли пользователь запрашивать консультацию
   const canRequestConsultation = () => {
@@ -43,6 +107,9 @@ function DoctorProfilePage() {
       setLoading(true);
       try {
         const data = await doctorsApi.getDoctorById(doctorId);
+        console.log('Получены данные о враче:', data);
+        console.log('ID врача:', data.id);
+        console.log('user_id врача:', data.user_id);
         setDoctor(data);
       } catch (err) {
         setError('Не удалось загрузить информацию о враче. Пожалуйста, попробуйте позже.');
@@ -55,12 +122,61 @@ function DoctorProfilePage() {
     fetchDoctorData();
   }, [doctorId]);
   
+  // Загружаем отзывы о враче
+  useEffect(() => {
+    const fetchReviews = async () => {
+      if (!doctorId) return;
+      
+      setReviewsLoading(true);
+      try {
+        // Используем user_id из профиля врача, а не id профиля
+        if (doctor && doctor.user_id) {
+          const response = await api.get(`/api/doctors/${doctor.user_id}/reviews`);
+          
+          // Для каждого отзыва пытаемся получить информацию о пациенте
+          const reviewsWithPatientInfo = await Promise.all(
+            response.data.map(async (review) => {
+              try {
+                // Получаем консультацию, чтобы узнать ID пациента
+                const consultResponse = await api.get(`/api/consultations/${review.consultation_id}`);
+                const patientId = consultResponse.data.patient_id;
+                
+                // Получаем профиль пациента
+                const patientResponse = await api.get(`/patients/${patientId}/profile`);
+                
+                // Добавляем информацию о пациенте в отзыв
+                return {
+                  ...review,
+                  patientName: patientResponse.data.full_name || 'Пациент'
+                };
+              } catch (err) {
+                console.log('Не удалось получить данные о пациенте:', err);
+                return {...review, patientName: 'Пациент'};
+              }
+            })
+          );
+          
+          setReviews(reviewsWithPatientInfo);
+        }
+      } catch (err) {
+        console.error('Ошибка при загрузке отзывов:', err);
+        setReviewsError('Не удалось загрузить отзывы о враче');
+      } finally {
+        setReviewsLoading(false);
+      }
+    };
+    
+    if (doctor) {
+      fetchReviews();
+    }
+  }, [doctor]);
+  
   // Обработчик кнопки "Назад к поиску"
   const handleBackToSearch = () => {
     navigate('/search-doctors');
   };
   
-  // Заглушка для обработчика "Подать заявку на консультацию"
+  // Обработчик "Подать заявку на консультацию"
   const handleRequestConsultation = () => {
     if (!canRequestConsultation()) {
       if (!user) {
@@ -80,8 +196,15 @@ function DoctorProfilePage() {
       }
     }
     
-    alert("Функционал заявки на консультацию находится в разработке");
+    // Открываем модальное окно для запроса консультации
+    setIsConsultationModalOpen(true);
   };
+  
+  // Получаем текущую страницу отзывов
+  const indexOfLastReview = currentPage * reviewsPerPage;
+  const indexOfFirstReview = indexOfLastReview - reviewsPerPage;
+  const currentReviews = reviews.slice(indexOfFirstReview, indexOfLastReview);
+  const totalPages = Math.ceil(reviews.length / reviewsPerPage);
   
   // Отображаем индикатор загрузки
   if (loading) {
@@ -97,114 +220,154 @@ function DoctorProfilePage() {
     return (
       <div className="max-w-screen-xl mx-auto px-4 py-8">
         <Card>
-          <CardBody className="text-center text-danger py-8">
-            <p>{error}</p>
-            <Button color="primary" className="mt-4" onClick={handleBackToSearch}>
-              Вернуться к поиску врачей
-            </Button>
+          <CardBody>
+            <div className="text-danger text-center py-8">
+              <p>{error}</p>
+              <Button onPress={handleBackToSearch} color="primary" className="mt-4">
+                Назад к поиску
+              </Button>
+            </div>
           </CardBody>
         </Card>
       </div>
     );
   }
   
-  // Отображаем сообщение, если врач не найден
+  // Если доктор не найден
   if (!doctor) {
     return (
       <div className="max-w-screen-xl mx-auto px-4 py-8">
         <Card>
-          <CardBody className="text-center py-8">
-            <p>Врач с ID {doctorId} не найден.</p>
-            <Button color="primary" className="mt-4" onClick={handleBackToSearch}>
-              Вернуться к поиску врачей
-            </Button>
+          <CardBody>
+            <div className="text-gray-600 text-center py-8">
+              <p>Врач не найден. Возможно, он был удален или деактивирован.</p>
+              <Button onPress={handleBackToSearch} color="primary" className="mt-4">
+                Назад к поиску
+              </Button>
+            </div>
           </CardBody>
         </Card>
       </div>
     );
   }
   
-  // Форматируем районы практики в массив для отображения
-  const practiceAreasArray = doctor.practice_areas 
-    ? doctor.practice_areas.split(',').map(area => area.trim())
-    : [];
+  // Преобразуем строку specializations в массив
+  const specializationsArray = doctor.specializations ? doctor.specializations.split(',').map(s => s.trim()) : [];
   
+  // Преобразуем строку practice_areas в массив
+  const practiceAreasArray = doctor.practice_areas ? doctor.practice_areas.split(',').map(s => s.trim()) : [];
+  
+  // Форматирование даты
+  const formatDate = (dateString) => {
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    return new Date(dateString).toLocaleDateString('ru-RU', options);
+  };
+  
+  // Рассчитаем рейтинг врача
+  const doctorRating = calculateRating(reviews);
+  
+  // Основной рендер
   return (
     <div className="max-w-screen-xl mx-auto px-4 py-8">
-      <div className="mb-4">
-        <Button 
-          color="default" 
-          variant="light" 
-          onClick={handleBackToSearch}
-        >
-          ← Назад к поиску
-        </Button>
-      </div>
+      <Button 
+        onPress={handleBackToSearch} 
+        variant="light" 
+        className="mb-4"
+      >
+        ← Назад к поиску
+      </Button>
       
-      <Card className="mb-6">
+      <Card className="shadow-md mb-6">
         <CardBody className="p-6">
-          {/* Шапка профиля */}
-          <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-primary mb-1">
-                {doctor.full_name || 'Имя не указано'}
-                {doctor.is_verified && (
-                  <span className="ml-2 text-xs text-success">✓ Верифицирован</span>
+          <div className="flex flex-col md:flex-row gap-8">
+            {/* Левая колонка с фото и основной информацией */}
+            <div className="w-full md:w-1/3">
+              <div className="bg-gray-200 rounded-lg aspect-square mb-4 flex items-center justify-center overflow-hidden">
+                {doctor.avatar_path ? (
+                  <img 
+                    src={`http://127.0.0.1:8000${doctor.avatar_path}`}
+                    alt={`Аватар ${doctor.full_name || "врача"}`}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-6xl">👨‍⚕️</span>
                 )}
+              </div>
+              
+              {doctor.is_active ? (
+                <Chip color="success" variant="flat" className="mb-4">Принимает пациентов</Chip>
+              ) : (
+                <Chip color="danger" variant="flat" className="mb-4">Не принимает пациентов</Chip>
+              )}
+              
+              <h1 className="text-2xl font-bold mb-1">
+                {doctor.last_name || ""} {doctor.first_name || ""} {doctor.middle_name || ""}
               </h1>
-              <h2 className="text-xl text-gray-600">{doctor.specialization}</h2>
-            </div>
-            <div className="mt-4 md:mt-0">
-              <div className="bg-primary/10 p-3 rounded-lg text-center">
-                <p className="text-sm text-gray-600">Стоимость консультации</p>
-                <p className="text-2xl font-bold text-primary">{doctor.cost_per_consultation.toLocaleString()} UZS</p>
+              
+              <p className="text-gray-600 mb-4">
+                {doctor.position || "Врач"}
+              </p>
+              
+              {/* Отображение рейтинга */}
+              <div className="mb-4">
+                {reviews.length > 0 ? (
+                  <div>
+                    <StarRating rating={doctorRating} />
+                    <p className="text-sm text-gray-600 mt-1">На основе {reviews.length} отзывов</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Нет отзывов</p>
+                )}
               </div>
-            </div>
-          </div>
-          
-          <Divider className="my-4" />
-          
-          {/* Статус доступности */}
-          <div className="mb-4">
-            {doctor.is_active ? (
-              <Chip color="success" variant="flat">Доступен для консультаций</Chip>
-            ) : (
-              <Chip color="danger" variant="flat">Недоступен для консультаций</Chip>
-            )}
-          </div>
-          
-          {/* Рейтинг */}
-          {doctor.rating !== undefined && (
-            <div className="flex items-center mb-4">
-              <div className="flex items-center">
-                <span className="text-yellow-500 text-xl">★</span>
-                <span className="ml-1 font-bold">{doctor.rating}</span>
-              </div>
-              <span className="ml-2 text-sm text-gray-500">
-                ({doctor.reviews_count || 0} {doctor.reviews_count === 1 ? 'отзыв' : 'отзывов'})
-              </span>
-            </div>
-          )}
-          
-          {/* Основная информация */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Левая колонка */}
-            <div>
+              
+              {doctor.district && (
+                <p className="text-sm text-gray-600 mb-1">
+                  <span className="font-semibold">Район: </span>
+                  {doctor.district}
+                </p>
+              )}
+              
               {doctor.experience && (
-                <InfoSection title="Опыт работы">
-                  <p>{doctor.experience}</p>
+                <p className="text-sm text-gray-600 mb-1">
+                  <span className="font-semibold">Опыт работы: </span>
+                  {doctor.experience} лет
+                </p>
+              )}
+              
+              {doctor.joined_at && (
+                <p className="text-sm text-gray-600 mb-1">
+                  <span className="font-semibold">На платформе с: </span>
+                  {formatDate(doctor.joined_at)}
+                </p>
+              )}
+            </div>
+            
+            {/* Правая колонка с детальной информацией */}
+            <div className="w-full md:w-2/3">
+              {doctor.about && (
+                <InfoSection title="О враче">
+                  <p className="text-gray-700">{doctor.about}</p>
                 </InfoSection>
               )}
               
               {doctor.education && (
                 <InfoSection title="Образование">
-                  <p>{doctor.education}</p>
+                  <p className="text-gray-700">{doctor.education}</p>
                 </InfoSection>
               )}
-            </div>
-            
-            {/* Правая колонка */}
-            <div>
+              
+              {specializationsArray.length > 0 && (
+                <InfoSection title="Специализации">
+                  <div className="flex flex-wrap gap-2">
+                    {specializationsArray.map((spec, index) => (
+                      <Chip key={index} color="primary" variant="flat">
+                        {spec}
+                      </Chip>
+                    ))}
+                  </div>
+                </InfoSection>
+              )}
+              
               {practiceAreasArray.length > 0 && (
                 <InfoSection title="Районы практики">
                   <div className="flex flex-wrap gap-2">
@@ -216,56 +379,67 @@ function DoctorProfilePage() {
                   </div>
                 </InfoSection>
               )}
-              
-              {/* Кнопка заявки на консультацию */}
-              <div className="mt-6">
-                <Tooltip 
-                  content={
-                    !user 
-                      ? "Войдите в систему, чтобы записаться на консультацию" 
-                      : user.role !== 'patient' 
-                        ? "Только пациенты могут записываться на консультации" 
-                        : !doctor.is_active 
-                          ? "Врач в данный момент недоступен для консультаций" 
-                          : null
-                  }
-                  isDisabled={canRequestConsultation()}
-                >
-                  <div className="w-full">
-                    <Button 
-                      color={doctor.is_active ? "primary" : "default"}
-                      className="w-full" 
-                      size="lg"
-                      onClick={handleRequestConsultation}
-                      isDisabled={!doctor.is_active}
-                    >
-                      {doctor.is_active 
-                        ? "Подать заявку на консультацию" 
-                        : "Консультации временно недоступны"
-                      }
-                    </Button>
-                  </div>
-                </Tooltip>
-                {doctor.is_active && (
-                  <p className="text-xs text-gray-500 mt-2 text-center">
-                    После подачи заявки врач свяжется с вами для уточнения деталей и назначения времени консультации.
-                  </p>
-                )}
-              </div>
             </div>
           </div>
         </CardBody>
       </Card>
       
-      {/* Заглушка для отзывов */}
-      <Card>
-        <CardBody className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Отзывы пациентов</h2>
-          <p className="text-gray-500 text-center py-6">
-            Раздел отзывов находится в разработке.
-          </p>
+      {/* Секция с кнопкой запроса консультации */}
+      <Card className="shadow-md mb-6">
+        <CardBody className="p-6 flex justify-center">
+          <Button 
+            color="primary" 
+            size="lg"
+            onPress={handleRequestConsultation}
+            isDisabled={!canRequestConsultation()}
+          >
+            Записаться на консультацию
+          </Button>
         </CardBody>
       </Card>
+      
+      {/* Секция с отзывами */}
+      <Card className="shadow-md">
+        <CardBody className="p-6">
+          <h3 className="text-xl font-bold mb-4">Отзывы о враче</h3>
+          
+          {reviewsLoading ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : reviewsError ? (
+            <p className="text-center text-danger">{reviewsError}</p>
+          ) : reviews.length === 0 ? (
+            <p className="text-center text-gray-500 py-4">У этого врача пока нет отзывов</p>
+          ) : (
+            <div>
+              {currentReviews.map((review, index) => (
+                <ReviewItem key={index} review={review} />
+              ))}
+              
+              {/* Пагинация */}
+              {totalPages > 1 && (
+                <div className="flex justify-center mt-4">
+                  <Pagination 
+                    total={totalPages} 
+                    initialPage={1}
+                    page={currentPage}
+                    onChange={setCurrentPage}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+      
+      {/* Модальное окно для запроса консультации */}
+      <RequestConsultationModal 
+        isOpen={isConsultationModalOpen}
+        onClose={() => setIsConsultationModalOpen(false)}
+        doctorId={doctor.user_id}
+        doctorName={`${doctor.last_name || ""} ${doctor.first_name || ""} ${doctor.middle_name || ""}`}
+      />
     </div>
   );
 }

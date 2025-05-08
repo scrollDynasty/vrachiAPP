@@ -198,8 +198,12 @@ class Consultation(Base):
     started_at = Column(DateTime, nullable=True) # Когда начата
     completed_at = Column(DateTime, nullable=True) # Когда завершена
     
-    # Лимит времени для чата (в минутах)
-    chat_time_limit = Column(Integer, default=5) # 5 минут по умолчанию
+    # Лимит и счетчик сообщений
+    message_limit = Column(Integer, default=30) # 30 сообщений по умолчанию
+    message_count = Column(Integer, default=0) # Текущее количество сообщений
+    
+    # Сопроводительное письмо от пациента
+    patient_note = Column(Text, nullable=True) # Сопроводительное письмо от пациента
     
     # Отношения
     patient = relationship("User", foreign_keys=[patient_id])
@@ -244,11 +248,38 @@ class Review(Base):
     # Дата создания
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Отношения
+    # Отношение к консультации
     consultation = relationship("Consultation", back_populates="review")
 
 
-# Модель для хранения данных неподтвержденных пользователей
+# Модель для уведомлений пользователей
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    # Заголовок и содержание уведомления
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    
+    # Тип уведомления: system, consultation, review, etc.
+    type = Column(String(50), default="system")
+    
+    # Прочитано ли уведомление
+    is_viewed = Column(Boolean, default=False)
+    
+    # Ссылка на связанный объект (опционально)
+    related_id = Column(Integer, nullable=True)
+    
+    # Дата создания
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Отношение к пользователю
+    user = relationship("User")
+
+
+# Модель для ожидающих подтверждения пользователей (до активации)
 class PendingUser(Base):
     __tablename__ = "pending_users"
 

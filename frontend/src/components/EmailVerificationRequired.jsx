@@ -74,9 +74,17 @@ const EmailVerificationRequired = () => {
             </Button>
             <Button
               color="primary"
-              onClick={() => window.location.href = '/'}
+              className="mt-4"
+              onPress={() => window.location.href = '/verify-email'}
             >
-              Вернуться на главную
+              Перейти к подтверждению
+            </Button>
+            <Button
+              variant="light"
+              className="mt-2"
+              onPress={() => window.location.href = '/'}
+            >
+              На главную
             </Button>
           </div>
         </CardBody>

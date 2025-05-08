@@ -11,6 +11,7 @@ import AuthPage from './pages/AuthPage'
 import SearchDoctorsPage from './pages/SearchDoctorsPage'
 import DoctorProfilePage from './pages/DoctorProfilePage'
 import HistoryPage from './pages/HistoryPage'
+import ConsultationPage from './pages/ConsultationPage'
 import GoogleAuthCallback from './pages/GoogleAuthCallback'
 import AdminPage from './pages/AdminPage'
 import DoctorApplicationPage from './pages/DoctorApplicationPage'
@@ -178,9 +179,9 @@ function App() {
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
-          <Route path="/admin-piisa-popa" element={<AdminLoginPage />} />
-          <Route path="/404" element={<NotFoundPage />} />
+        <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
+        <Route path="/admin-piisa-popa" element={<AdminLoginPage />} />
+        <Route path="/404" element={<NotFoundPage />} />
           
           {/* Страница для заполнения профиля - удалена, больше не нужна */}
           {/* <Route 
@@ -201,6 +202,8 @@ function App() {
               {/* Маршрут для публичного профиля врача (доступен только аутентифицированным пользователям) */}
               <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
               <Route path="/doctor-application" element={<DoctorApplicationPage />} />
+              {/* Маршрут для страницы консультации */}
+              <Route path="/consultations/:consultationId" element={<ConsultationPage />} />
             </Route>
         </Route>
 
@@ -211,7 +214,7 @@ function App() {
         </Route>
 
         {/* Роут для всех остальных путей - страница 404 Not Found */}
-          <Route path="*" element={<Navigate to="/404" replace />} />
+        <Route path="*" element={<Navigate to="/404" replace />} />
       </Routes>
       </main>
       

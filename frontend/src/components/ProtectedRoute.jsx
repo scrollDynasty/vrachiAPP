@@ -65,7 +65,7 @@ function ProtectedRoute({ allowedRoles }) {
               У вас недостаточно прав для доступа к этой странице. Требуется роль: {allowedRoles.join(' или ')}.
             </p>
             <button 
-              onClick={() => window.history.back()} 
+              onPress={() => window.history.back()} 
               className="px-5 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-dark transition-colors"
             >
               Вернуться назад
