@@ -34,7 +34,7 @@ from pydantic import BaseModel, ValidationError  # Для моделей дан�
 from fastapi.staticfiles import StaticFiles  # Для раздачи статических файлов
 import secrets
 import time
-import jwt as pyjwt  # Импортируем PyJWT как pyjwt
+import jwt  # Импортируем PyJWT
 import asyncio  # Добавляем для асинхронного кода
 from starlette.websockets import WebSocketState  # Импортируем WebSocketState из starlette
 
@@ -2486,6 +2486,58 @@ async def send_message(
     db.commit()
     db.refresh(new_message)
 
+    # Проверяем, достигнут ли лимит сообщений для пациента
+    # и автоматически завершаем консультацию, если лимит достигнут
+    if current_user.role == "patient" and consultation.message_count >= consultation.message_limit:
+        try:
+            # Автоматически завершаем консультацию
+            consultation.status = "completed"
+            consultation.completed_at = datetime.utcnow()
+            db.commit()
+            
+            # Отправляем уведомления о завершении
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation.doctor_id).first()
+            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == consultation.patient_id).first()
+            
+            doctor_name = doctor_profile.full_name if doctor_profile else "Врач"
+            patient_name = patient_profile.full_name if patient_profile else "Пациент"
+            
+            # Уведомление для врача
+            await create_notification(
+                db=db,
+                user_id=consultation.doctor_id,
+                title="🔴 Консультация автоматически завершена",
+                message=f"Консультация с {patient_name} автоматически завершена, так как достигнут лимит сообщений ({consultation.message_limit}).",
+                notification_type="consultation_completed",
+                related_id=consultation.id
+            )
+            
+            # Уведомление для пациента
+            await create_notification(
+                db=db,
+                user_id=consultation.patient_id,
+                title="🔴 Консультация автоматически завершена",
+                message=f"Ваша консультация с {doctor_name} автоматически завершена, так как достигнут лимит сообщений ({consultation.message_limit}). Вы можете оставить отзыв о консультации.",
+                notification_type="consultation_completed",
+                related_id=consultation.id
+            )
+            
+            # Отправляем WebSocket уведомление
+            await broadcast_consultation_update(consultation_id, {
+                "type": "status_changed",
+                "consultation_id": consultation_id,
+                "status": "completed",
+                "updated_at": consultation.completed_at.isoformat(),
+                "initiator_id": current_user.id,
+                "auto_completed": True,
+                "message": f"Консультация автоматически завершена, так как достигнут лимит сообщений ({consultation.message_limit})."
+            })
+            
+            print(f"Консультация {consultation_id} автоматически завершена из-за достижения лимита сообщений.")
+            
+        except Exception as e:
+            print(f"Ошибка при автоматическом завершении консультации: {str(e)}")
+
     # Добавляем уведомление получателю о новом сообщении
     try:
         # Определяем получателя (если отправитель - врач, то получатель - пациент и наоборот)
@@ -2667,10 +2719,22 @@ async def create_review(
     return new_review
 
 
+# Добавляем модель для ответа без отзыва
+class ReviewResponseOrNull(BaseModel):
+    id: Optional[int] = None
+    consultation_id: Optional[int] = None
+    rating: Optional[int] = None
+    comment: Optional[str] = None
+    created_at: Optional[datetime] = None
+    exists: bool = False
+
+    class Config:
+        from_attributes = True
+
 # Эндпоинт для получения отзыва о консультации
 @app.get(
     "/api/consultations/{consultation_id}/review",
-    response_model=ReviewResponse,
+    response_model=ReviewResponseOrNull,
     tags=["consultations"],
 )
 async def get_review(
@@ -2680,6 +2744,7 @@ async def get_review(
 ):
     """
     Получает отзыв о конкретной консультации.
+    Если отзыв не существует, возвращает пустой объект с exists=False.
     """
     # Получаем консультацию
     consultation = (
@@ -2703,9 +2768,23 @@ async def get_review(
     review = db.query(Review).filter(Review.consultation_id == consultation_id).first()
 
     if not review:
-        raise HTTPException(status_code=404, detail="Отзыв не найден")
+        # Вместо ошибки 404 возвращаем пустой объект
+        return ReviewResponseOrNull(
+            consultation_id=consultation_id,
+            exists=False
+        )
 
-    return review
+    # Преобразуем отзыв в нужный формат с exists=True
+    result = ReviewResponseOrNull(
+        id=review.id,
+        consultation_id=review.consultation_id,
+        rating=review.rating,
+        comment=review.comment,
+        created_at=review.created_at,
+        exists=True
+    )
+    
+    return result
 
 
 # Эндпоинт для получения всех отзывов о враче
@@ -3550,9 +3629,12 @@ async def websocket_consultation_endpoint(
                 
                 # Если это уведомление об изменении статуса консультации
                 elif data.get("type") == "status_update":
-                    # Проверяем, что только врачи могут изменить статус
-                    if user.id == consultation.doctor_id or user.role == "admin":
+                    # Проверяем, что отправитель является участником консультации
+                    if user.id == consultation.doctor_id or user.id == consultation.patient_id or user.role == "admin":
                         new_status = data.get("status")
+                        auto_completed = data.get("auto_completed", False)
+                        reason = data.get("reason", "")
+                        
                         if new_status in ["completed"]:
                             consultation.status = new_status
                             consultation.completed_at = datetime.utcnow()
@@ -3566,8 +3648,61 @@ async def websocket_consultation_endpoint(
                                     "id": consultation.id,
                                     "status": consultation.status,
                                     "completed_at": consultation.completed_at.isoformat() if consultation.completed_at else None
-                                }
+                                },
+                                "initiator_id": user.id,
+                                "initiator_role": user.role,
+                                "auto_completed": auto_completed,
+                                "reason": reason
                             })
+                            
+                            # Создаем уведомления для участников
+                            try:
+                                # Получаем профили участников для персонализации уведомлений
+                                doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation.doctor_id).first()
+                                patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == consultation.patient_id).first()
+                                
+                                doctor_name = "Врач"
+                                if doctor_profile:
+                                    doctor_name = doctor_profile.full_name
+                                
+                                patient_name = "Пациент"
+                                if patient_profile:
+                                    patient_name = patient_profile.full_name
+                                
+                                # Формируем сообщения в зависимости от автоматического завершения
+                                if auto_completed and reason:
+                                    doctor_message = f"Консультация с {patient_name} автоматически завершена: {reason}"
+                                    patient_message = f"Консультация с {doctor_name} автоматически завершена: {reason}. Вы можете оставить отзыв о консультации."
+                                else:
+                                    # Определяем инициатора завершения для корректного формирования сообщения
+                                    initiator_name = doctor_name if user.id == consultation.doctor_id else patient_name
+                                    
+                                    doctor_message = f"{patient_name if user.id == consultation.patient_id else 'Консультация'} завершил(а) консультацию."
+                                    patient_message = f"{doctor_name if user.id == consultation.doctor_id else 'Консультация'} завершил(а) консультацию. Вы можете оставить отзыв о консультации."
+                                
+                                # Создаем уведомление для врача
+                                if user.id != consultation.doctor_id:
+                                    await create_notification(
+                                        db=db,
+                                        user_id=consultation.doctor_id,
+                                        title="🔴 Консультация завершена",
+                                        message=doctor_message,
+                                        notification_type="consultation_completed",
+                                        related_id=consultation.id
+                                    )
+                                
+                                # Создаем уведомление для пациента
+                                if user.id != consultation.patient_id:
+                                    await create_notification(
+                                        db=db,
+                                        user_id=consultation.patient_id,
+                                        title="🔴 Консультация завершена",
+                                        message=patient_message,
+                                        notification_type="consultation_completed",
+                                        related_id=consultation.id
+                                    )
+                            except Exception as notif_error:
+                                print(f"Ошибка при отправке уведомлений о завершении: {str(notif_error)}")
                 
                 # Если это запрос на отметку всех сообщений как прочитанных
                 elif data.get("type") == "mark_read":
@@ -3928,10 +4063,14 @@ def read_patient_profile_by_user_id(user_id: int, db: DbDependency):
     return profile
 
 
+# Добавляем схему модели для непрочитанных сообщений
+class UnreadMessagesResponse(BaseModel):
+    unread_counts: Dict[str, int]
+
 # Add unread messages endpoint
 @app.get(
     "/api/consultations/unread",
-    response_model=dict,  # Явно указываем, что ответ - словарь
+    response_model=UnreadMessagesResponse,  # Используем новую модель
     tags=["consultations"],
 )
 async def get_unread_messages(
@@ -3946,7 +4085,7 @@ async def get_unread_messages(
     """
     try:
         # Инициализируем пустой словарь для хранения результатов
-        result = {}
+        unread_counts = {}
             
         # Получаем все активные консультации пользователя
         consultations = []
@@ -3973,9 +4112,6 @@ async def get_unread_messages(
             # Если роль не patient и не doctor, возвращаем пустой объект
             return {"unread_counts": {}}
         
-        # Словарь для хранения количества непрочитанных сообщений по консультациям
-        unread_counts = {}
-        
         # Для каждой консультации получаем количество непрочитанных сообщений
         for consultation in consultations:
             try:
@@ -3992,13 +4128,14 @@ async def get_unread_messages(
                 
                 # Если есть непрочитанные сообщения, добавляем их в словарь
                 if unread_count > 0:
+                    # Преобразуем id консультации в строку, так как фронтенд ожидает строковые ключи
                     unread_counts[str(consultation.id)] = unread_count
             except Exception as inner_e:
                 # Если возникла ошибка с конкретной консультацией, пропускаем ее
                 print(f"Error processing consultation {consultation.id}: {str(inner_e)}")
                 continue
         
-        # Возвращаем структурированный объект вместо прямого словаря
+        # Возвращаем структурированный объект
         return {"unread_counts": unread_counts}
     except Exception as e:
         # Логируем ошибку для отладки

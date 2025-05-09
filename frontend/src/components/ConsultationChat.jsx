@@ -265,31 +265,15 @@ function ConsultationChat({ consultationId, consultation, onConsultationUpdated,
       console.log('[Chat] Лимит сообщений достигнут, запускаем автоматическое завершение');
       
       // Показываем предупреждение
-      toast.warning(`Достигнут лимит сообщений (${patientMessageCount}/${consultation.message_limit})`, {
+      toast.error(`Достигнут лимит сообщений (${patientMessageCount}/${consultation.message_limit})`, {
         duration: 5000,
         id: 'message-limit-warning'
       });
       
       // Запускаем таймер для завершения консультации
       const timer = setTimeout(() => {
-        toast.loading('Автоматическое завершение консультации...', {
-          id: 'auto-complete-consultation'
-        });
-        
-        // Проверяем WebSocket соединение
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          // Отправляем запрос на завершение
-          socketRef.current.send(JSON.stringify({
-            type: 'status_update',
-            status: 'completed',
-            consultation_id: consultationId
-          }));
-        } else {
-          toast.error('Нет соединения с сервером для завершения консультации', {
-            id: 'auto-complete-consultation'
-          });
-        }
-      }, 5000);
+        autoCompleteConsultation();
+      }, 2000);
       
       return () => clearTimeout(timer);
     }
@@ -699,7 +683,7 @@ function ConsultationChat({ consultationId, consultation, onConsultationUpdated,
     }
   };
 
-  // Функция для завершения консультации
+  // Функция для автоматического завершения консультации
   const autoCompleteConsultation = () => {
     // Проверяем, что консультация активна
     if (!consultation || consultation.status !== 'active') {
@@ -718,19 +702,76 @@ function ConsultationChat({ consultationId, consultation, onConsultationUpdated,
       return;
     }
     
-    // Отправляем запрос на завершение через WebSocket
-    socketRef.current.send(JSON.stringify({
-      type: 'status_update',
-      status: 'completed',
-      consultation_id: consultationId
-    }));
-    
-    // Устанавливаем таймаут для проверки завершения
-    setTimeout(() => {
-      if (consultation.status !== 'completed') {
+    // Создаем Promise, который разрешится при получении подтверждения
+    const completePromise = new Promise((resolve, reject) => {
+      // Обработчик для получения подтверждения
+      const statusHandler = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          // Если это обновление статуса консультации
+          if (data.type === 'status_update' && data.consultation && 
+              data.consultation.id === Number(consultationId) && 
+              data.consultation.status === 'completed') {
+            
+            // Удаляем этот обработчик
+            socketRef.current.removeEventListener('message', statusHandler);
+            
+            // Отменяем таймаут
+            clearTimeout(timeoutId);
+            
+            // Разрешаем Promise
+            resolve(data.consultation);
+          }
+        } catch (e) {
+          console.error('[WebSocket] Ошибка при обработке ответа на завершение консультации:', e);
+        }
+      };
+      
+      // Добавляем обработчик
+      socketRef.current.addEventListener('message', statusHandler);
+      
+      // Устанавливаем таймаут
+      const timeoutId = setTimeout(() => {
+        // Удаляем обработчик
+        socketRef.current.removeEventListener('message', statusHandler);
+        
+        // Показываем ошибку
         toast.error('Не удалось автоматически завершить консультацию. Обратитесь к врачу.', {id: 'auto-complete-consultation'});
-      }
-    }, 3000);
+        
+        reject(new Error('Таймаут при завершении консультации'));
+      }, 5000);
+      
+      // Отправляем запрос на завершение через WebSocket
+      socketRef.current.send(JSON.stringify({
+        type: 'status_update',
+        status: 'completed',
+        consultation_id: Number(consultationId),
+        auto_completed: true,
+        reason: 'Достигнут лимит сообщений'
+      }));
+      
+      console.log("[WebSocket] Запрос на автоматическое завершение консультации отправлен");
+    });
+    
+    // Обрабатываем результат
+    completePromise
+      .then(() => {
+        toast.dismiss('auto-complete-consultation');
+        toast.success('Консультация автоматически завершена из-за достижения лимита сообщений', { duration: 5000 });
+        
+        // Обновляем данные консультации через колбэк
+        if (onConsultationUpdated) {
+          onConsultationUpdated({
+            ...consultation,
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("[Chat] Ошибка при автоматическом завершении консультации:", error);
+      });
   };
 
   // Вспомогательная функция для безопасного получения значений из localStorage
@@ -897,13 +938,14 @@ function ConsultationChat({ consultationId, consultation, onConsultationUpdated,
               console.log('[Chat] Достигнут лимит сообщений. Автоматическое завершение консультации.');
               
               // Показываем предупреждение
-              toast.warning('Достигнут лимит сообщений. Консультация будет завершена.', {
-                duration: 5000
+              toast.error('Достигнут лимит сообщений. Консультация будет завершена.', {
+                duration: 5000,
+                icon: '⚠️'
               });
               
               // Отложенно запускаем завершение консультации
               setTimeout(() => {
-                completeConsultation();
+                autoCompleteConsultation();
               }, 3000);
             }
           }
@@ -964,6 +1006,21 @@ function ConsultationChat({ consultationId, consultation, onConsultationUpdated,
             // Если консультация завершена, показываем уведомление
             if (data.consultation.status === 'completed') {
               toast.success('Консультация успешно завершена', {id: 'complete-consultation'});
+              
+              // Если это пациент, показываем модальное окно отзыва через 1 секунду
+              if (isPatient) {
+                setTimeout(() => {
+                  // Проверяем, существует ли функция showReviewModal
+                  if (window.showReviewModal) {
+                    console.log('[Chat] Показываем модальное окно отзыва после завершения консультации');
+                    window.showReviewModal((success) => {
+                      console.log('[Chat] Результат отправки отзыва:', success ? 'успешно' : 'неудачно');
+                    });
+                  } else {
+                    console.warn('[Chat] Функция showReviewModal не найдена');
+                  }
+                }, 1000);
+              }
             }
           }
           break;

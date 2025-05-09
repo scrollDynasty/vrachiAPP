@@ -19,7 +19,7 @@ from passlib.context import CryptContext
 
 # Импорты для работы с JWT
 from jose import JWTError
-import jwt as pyjwt
+import jwt
 
 # Импорт для загрузки переменных окружения из .env файла
 from dotenv import load_dotenv
@@ -145,7 +145,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     # Кодируем payload в JWT токен, используя секретный ключ и алгоритм.
     # SECRET_KEY должен быть известен только серверу, который подписывает токены,
     # и серверам, которые их проверяют.
-    encoded_jwt = pyjwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
     return encoded_jwt
 
@@ -479,7 +479,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Se
     )
     try:
         # Декодируем JWT токен, извлекая данные (payload)
-        payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         
         # Получаем имя пользователя (email) из поля "sub" в payload токена
         username: str = payload.get("sub")
@@ -660,7 +660,7 @@ def increment_login_attempts(username: str) -> None:
 # Проверка валидности токена
 def verify_token(token: str, credentials_exception):
     try:
-        payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: int = payload.get("sub")
         if user_id is None:
             raise credentials_exception
