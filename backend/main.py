@@ -2278,6 +2278,31 @@ async def start_consultation(
     db.commit()
     db.refresh(consultation)
 
+    # Создаем уведомление для пациента о начале консультации
+    try:
+        # Получаем пациента для персонализации уведомления
+        patient = db.query(User).filter(User.id == consultation.patient_id).first()
+        # Получаем профиль врача для персонализации уведомления
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation.doctor_id).first()
+        
+        doctor_name = "Врач"
+        if doctor_profile:
+            doctor_name = doctor_profile.full_name
+        
+        # Создаем уведомление с ярким, привлекающим внимание заголовком
+        await create_notification(
+            db=db,
+            user_id=consultation.patient_id,
+            title="🔴 Консультация началась!",
+            message=f"{doctor_name} начал(а) консультацию и готов(а) ответить на ваши вопросы. Перейдите в чат, чтобы продолжить общение.",
+            notification_type="consultation_started",
+            related_id=consultation.id
+        )
+        
+        print(f"Уведомление о начале консультации отправлено пациенту {consultation.patient_id}")
+    except Exception as e:
+        print(f"Ошибка при отправке уведомления о начале консультации: {str(e)}")
+
     # Отправляем уведомление через WebSocket
     if consultation_id in consultation_websocket_connections:
         for connection in consultation_websocket_connections[consultation_id]:
@@ -2340,6 +2365,61 @@ async def complete_consultation(
 
     db.commit()
     db.refresh(consultation)
+
+    # Отправляем уведомление о завершении консультации обоим участникам
+    try:
+        # Получаем профили участников для персонализации уведомлений
+        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation.doctor_id).first()
+        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == consultation.patient_id).first()
+        
+        doctor_name = "Врач"
+        if doctor_profile:
+            doctor_name = doctor_profile.full_name
+        
+        patient_name = "Пациент"
+        if patient_profile:
+            patient_name = patient_profile.full_name
+        
+        # Определяем инициатора завершения для корректного формирования сообщения
+        initiator_name = doctor_name if current_user.id == consultation.doctor_id else patient_name
+        
+        # Создаем уведомление для врача (если завершил пациент)
+        if current_user.id == consultation.patient_id:
+            await create_notification(
+                db=db,
+                user_id=consultation.doctor_id,
+                title="🔴 Консультация завершена",
+                message=f"{patient_name} завершил(а) консультацию. Просмотрите историю для деталей.",
+                notification_type="consultation_completed",
+                related_id=consultation.id
+            )
+        
+        # Создаем уведомление для пациента (если завершил врач)
+        if current_user.id == consultation.doctor_id:
+            await create_notification(
+                db=db,
+                user_id=consultation.patient_id,
+                title="🔴 Консультация завершена",
+                message=f"{doctor_name} завершил(а) консультацию. Вы можете оставить отзыв о консультации.",
+                notification_type="consultation_completed",
+                related_id=consultation.id
+            )
+        
+        print(f"Уведомления о завершении консультации отправлены. Инициатор: {initiator_name}")
+    except Exception as e:
+        print(f"Ошибка при отправке уведомлений о завершении консультации: {str(e)}")
+
+    # Отправляем WebSocket уведомление
+    try:
+        await broadcast_consultation_update(consultation_id, {
+            "type": "status_changed",
+            "consultation_id": consultation_id,
+            "status": "completed",
+            "updated_at": consultation.completed_at.isoformat(),
+            "initiator_id": current_user.id
+        })
+    except Exception as e:
+        print(f"Ошибка при отправке WebSocket-уведомления о завершении консультации: {str(e)}")
 
     return consultation
 
@@ -2405,6 +2485,42 @@ async def send_message(
     db.add(new_message)
     db.commit()
     db.refresh(new_message)
+
+    # Добавляем уведомление получателю о новом сообщении
+    try:
+        # Определяем получателя (если отправитель - врач, то получатель - пациент и наоборот)
+        recipient_id = consultation.patient_id if current_user.id == consultation.doctor_id else consultation.doctor_id
+        
+        # Получаем профиль отправителя для персонализации уведомления
+        sender_name = "Пользователь"
+        if current_user.role == "doctor":
+            doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
+            if doctor_profile:
+                sender_name = doctor_profile.full_name
+        elif current_user.role == "patient":
+            patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
+            if patient_profile:
+                sender_name = patient_profile.full_name
+        
+        # Подготавливаем текст сообщения для уведомления (укорачиваем для предпросмотра)
+        message_preview = new_message.content
+        if len(message_preview) > 50:
+            message_preview = message_preview[:47] + "..."
+        
+        # Создаем уведомление
+        await create_notification(
+            db=db,
+            user_id=recipient_id,
+            title="📩 Новое сообщение в консультации",
+            message=f"{sender_name}: {message_preview}",
+            notification_type="new_message",
+            related_id=consultation.id
+        )
+        
+        print(f"Уведомление о новом сообщении отправлено пользователю {recipient_id}")
+    except Exception as e:
+        # Логируем ошибку, но не блокируем основной функционал
+        print(f"Ошибка при отправке уведомления о новом сообщении: {str(e)}")
 
     return new_message
 
@@ -3310,6 +3426,22 @@ async def websocket_consultation_endpoint(
                     
                     while attempts < max_attempts and not success:
                         try:
+                            # Важно: получаем новую (свежую) копию объекта консультации перед каждой попыткой
+                            # чтобы избежать ошибки "Record has changed since last read"
+                            fresh_consultation = (
+                                db.query(Consultation)
+                                .filter(Consultation.id == consultation_id)
+                                .with_for_update()  # Блокируем строку для обновления
+                                .first()
+                            )
+                            
+                            if not fresh_consultation:
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "message": "Консультация не найдена или была удалена"
+                                })
+                                break
+                            
                             # Создаем новое сообщение
                             new_message = Message(
                                 consultation_id=consultation_id,
@@ -3320,12 +3452,14 @@ async def websocket_consultation_endpoint(
                             
                             # Увеличиваем счетчик сообщений для контроля лимита
                             # Только если отправитель - пациент (у врача нет лимита)
-                            if user.id == consultation.patient_id:
-                                consultation.message_count += 1
+                            if user.id == fresh_consultation.patient_id:
+                                fresh_consultation.message_count += 1
                             
-                            # Пробуем добавить и сохранить в БД
+                            # Сначала добавляем сообщение
                             db.add(new_message)
+                            # Затем сохраняем изменения
                             db.commit()
+                            # Обновляем объект из БД
                             db.refresh(new_message)
                             
                             # Если успешно, выходим из цикла
@@ -3458,6 +3592,97 @@ async def websocket_consultation_endpoint(
                 # Если это пинг для проверки соединения
                 elif data.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
+                
+                # Если это запрос на получение истории сообщений
+                elif data.get("type") == "get_messages_bulk":
+                    try:
+                        print(f"[WebSocket] Получен запрос на историю сообщений для консультации {consultation_id}")
+                        
+                        # Получаем все сообщения для консультации
+                        messages = (
+                            db.query(Message)
+                            .filter(Message.consultation_id == consultation_id)
+                            .order_by(Message.sent_at.asc())
+                            .all()
+                        )
+                        
+                        # Форматируем сообщения для JSON
+                        formatted_messages = []
+                        for msg in messages:
+                            formatted_messages.append({
+                                "id": msg.id,
+                                "consultation_id": msg.consultation_id,
+                                "sender_id": msg.sender_id,
+                                "content": msg.content,
+                                "sent_at": msg.sent_at.isoformat(),
+                                "is_read": msg.is_read
+                            })
+                        
+                        # Добавляем подробную информацию о консультации
+                        consultation_data = {
+                            "id": consultation.id,
+                            "status": consultation.status,
+                            "message_count": consultation.message_count,
+                            "message_limit": consultation.message_limit,
+                            "patient_id": consultation.patient_id,
+                            "doctor_id": consultation.doctor_id,
+                            "created_at": consultation.created_at.isoformat() if consultation.created_at else None,
+                            "started_at": consultation.started_at.isoformat() if consultation.started_at else None,
+                            "completed_at": consultation.completed_at.isoformat() if consultation.completed_at else None
+                        }
+                        
+                        # Получаем информацию о пользователях
+                        patient = db.query(User).filter(User.id == consultation.patient_id).first()
+                        doctor = db.query(User).filter(User.id == consultation.doctor_id).first()
+                        
+                        patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == consultation.patient_id).first()
+                        doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == consultation.doctor_id).first()
+                        
+                        participants = {
+                            "patient": {
+                                "id": patient.id if patient else None,
+                                "name": patient_profile.full_name if patient_profile else "Пациент",
+                                "avatar": patient.avatar_path if patient and patient.avatar_path else None
+                            },
+                            "doctor": {
+                                "id": doctor.id if doctor else None,
+                                "name": doctor_profile.full_name if doctor_profile else "Врач",
+                                "avatar": doctor.avatar_path if doctor and doctor.avatar_path else None
+                            }
+                        }
+                        
+                        # Отправляем ответ с более полными данными
+                        await websocket.send_json({
+                            "type": "messages_bulk",
+                            "messages": formatted_messages,
+                            "consultation": consultation_data,
+                            "participants": participants
+                        })
+                        
+                        # Если есть непрочитанные сообщения, отмечаем их как прочитанные
+                        unread_messages = [m for m in messages if m.sender_id != user.id and not m.is_read]
+                        if unread_messages:
+                            for msg in unread_messages:
+                                msg.is_read = True
+                            db.commit()
+                            
+                            # Отправляем уведомление о прочтении всех сообщений
+                            await broadcast_consultation_update(consultation_id, {
+                                "type": "messages_read",
+                                "reader_id": user.id
+                            })
+                        
+                        print(f"[WebSocket] Отправлена история сообщений ({len(formatted_messages)} сообщений) для консультации {consultation_id}")
+                    except Exception as e:
+                        print(f"[WebSocket] Ошибка при получении истории сообщений: {str(e)}")
+                        # Записываем полную трассировку для отладки
+                        import traceback
+                        traceback.print_exc()
+                        
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Не удалось загрузить историю сообщений"
+                        })
                 
         except WebSocketDisconnect:
             print(f"WebSocket отключен пользователем {user.id} из консультации {consultation_id}")
@@ -3706,7 +3931,7 @@ def read_patient_profile_by_user_id(user_id: int, db: DbDependency):
 # Add unread messages endpoint
 @app.get(
     "/api/consultations/unread",
-    response_model=Dict[str, int],
+    response_model=dict,  # Явно указываем, что ответ - словарь
     tags=["consultations"],
 )
 async def get_unread_messages(
@@ -3720,6 +3945,9 @@ async def get_unread_messages(
         Dict[str, int]: Словарь, где ключи - ID консультаций, значения - количество непрочитанных сообщений
     """
     try:
+        # Инициализируем пустой словарь для хранения результатов
+        result = {}
+            
         # Получаем все активные консультации пользователя
         consultations = []
         
@@ -3742,8 +3970,8 @@ async def get_unread_messages(
                 .all()
             )
         else:
-            # Для других ролей (например, "admin") возвращаем пустой результат
-            return {}
+            # Если роль не patient и не doctor, возвращаем пустой объект
+            return {"unread_counts": {}}
         
         # Словарь для хранения количества непрочитанных сообщений по консультациям
         unread_counts = {}
@@ -3752,7 +3980,7 @@ async def get_unread_messages(
         for consultation in consultations:
             try:
                 # Получаем непрочитанные сообщения, отправленные НЕ текущим пользователем
-                unread_messages = (
+                unread_count = (
                     db.query(Message)
                     .filter(
                         Message.consultation_id == consultation.id,
@@ -3763,19 +3991,20 @@ async def get_unread_messages(
                 )
                 
                 # Если есть непрочитанные сообщения, добавляем их в словарь
-                if unread_messages > 0:
-                    unread_counts[str(consultation.id)] = unread_messages
+                if unread_count > 0:
+                    unread_counts[str(consultation.id)] = unread_count
             except Exception as inner_e:
                 # Если возникла ошибка с конкретной консультацией, пропускаем ее
                 print(f"Error processing consultation {consultation.id}: {str(inner_e)}")
                 continue
         
-        return unread_counts
+        # Возвращаем структурированный объект вместо прямого словаря
+        return {"unread_counts": unread_counts}
     except Exception as e:
         # Логируем ошибку для отладки
         print(f"Error getting unread messages: {str(e)}")
-        # Возвращаем пустой словарь вместо 500 ошибки
-        return {}
+        # Возвращаем пустой объект вместо 500 ошибки
+        return {"unread_counts": {}}
 
 
 # Новый эндпоинт для получения полной истории сообщений консультации с оптимизацией

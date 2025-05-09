@@ -67,7 +67,8 @@ const useChatStore = create(
             const unreadResponse = await api.get('/api/consultations/unread');
             
             if (unreadResponse.status === 200 && unreadResponse.data) {
-              const unreadData = unreadResponse.data;
+              // Получаем данные из нового формата ответа API
+              const unreadData = unreadResponse.data.unread_counts || {};
               
               // Проверяем формат данных
               if (typeof unreadData === 'object') {
