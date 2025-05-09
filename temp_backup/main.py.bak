@@ -493,9 +493,18 @@ async def login_for_access_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Проверяем правильность пароля
+        
+        # Если пользователь найден, проверяем пароль
+        # Если пользователь зарегистрирован через Google и у него нет пароля
+        if db_user.auth_provider == "google" and not db_user.hashed_password:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Этот аккаунт использует Google для входа. Пожалуйста, войдите через Google.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Проверяем пароль
         if not verify_password(form_data.password, db_user.hashed_password):
-            # Пользователь найден, но пароль неверный
             # Не увеличиваем счетчик неудачных попыток
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -503,63 +512,35 @@ async def login_for_access_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Проверяем, что пользователь активен
-        if not db_user.is_active:
-            # Не увеличиваем счетчик неудачных попыток, это не ошибка входа
+        # Если email не подтвержден и это не Google аккаунт
+        if not db_user.is_active and db_user.auth_provider != "google":
+            # Т.к. это не ошибка логина как таковая, не увеличиваем счетчик
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Учетная запись не активирована. Пожалуйста, подтвердите свой email.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-            
-        # Если у пользователя установлен auth_provider и это не "email", даем подсказку
-        if db_user.auth_provider and db_user.auth_provider != "email":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"This account was registered with {db_user.auth_provider}. Please use {db_user.auth_provider} login instead.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Пожалуйста, подтвердите ваш email перед входом. Проверьте вашу почту.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Создаем WebSocket токен для пользователя при успешном входе
-        websocket_token = await create_websocket_token(db_user.id, db)
-        print(f"Login: Created WebSocket token for user {db_user.id}: {websocket_token[:10]}...")
-            
-        # Успешная аутентификация. Сбрасываем счетчик неудачных попыток (отключено)
-        # reset_login_attempts(form_data.username)
+        # Создаем данные для включения в JWT токен
+        # sub - стандартный claim для хранения идентификатора пользователя в JWT
+        token_data = {"sub": db_user.email}
         
-        # Создаем JWT токен доступа с данными пользователя
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": db_user.email, "role": db_user.role},
-            expires_delta=access_token_expires
-        )
+        # Создаем JWT токен с ограниченным сроком действия
+        # Используем expires_delta из настроек (по умолчанию 30 минут)
+        access_token = create_access_token(data=token_data)
         
-        # Проверяем, есть ли у пользователя профиль
-        has_profile = False
-        if db_user.role == "patient":
-            profile = db.query(PatientProfile).filter(PatientProfile.user_id == db_user.id).first()
-            has_profile = profile is not None
-        elif db_user.role == "doctor":
-            profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == db_user.id).first()
-            has_profile = profile is not None
+        # Не сбрасываем счетчик неудачных попыток - rate limiting отключен
         
-        # Возвращаем токен доступа
-        print(f"Login successful for {db_user.email}")
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "need_profile": not has_profile,  # Если профиля нет, клиент должен перейти к созданию профиля
-        }
-        
-    except HTTPException as e:
-        # Пробрасываем исключение дальше
-        raise e
+        # Возвращаем созданный токен и его тип в соответствии со стандартом OAuth2
+        return {"access_token": access_token, "token_type": "bearer"}
+    
     except Exception as e:
-        # Логируем ошибку и возвращаем общее сообщение об ошибке
-        print(f"Unexpected error during login: {str(e)}")
+        # Логируем ошибку и возвращаем общую ошибку аутентификации
+        print(f"Login error: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже."
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ошибка аутентификации",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
@@ -676,10 +657,6 @@ def verify_email(
     # Удаляем запись из таблицы pending_users
     db.delete(pending_user)
     db.commit()
-
-    # Создаем WebSocket токен для нового пользователя
-    websocket_token = asyncio.run(create_websocket_token(new_user.id, db))
-    print(f"WebSocket token created for user {new_user.id}: {websocket_token[:10]}...")
 
     # Создаем и возвращаем JWT токен для автоматического входа
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -1040,151 +1017,42 @@ class GoogleAuthRequest(BaseModel):
 @app.post("/auth/google", response_model=Token)
 async def google_auth(data: GoogleAuthRequest, db: DbDependency):
     """
-    Аутентификация через Google OAuth.
-    Принимает код авторизации от клиента и обменивает его на данные пользователя.
-    Если пользователь существует, выполняет вход, иначе регистрирует нового.
+    Обработка авторизации через Google OAuth.
+    Принимает код авторизации от Google, получает данные пользователя,
+    создает/обновляет пользователя в БД и возвращает JWT-токен.
     """
     try:
-        # Получаем данные пользователя от Google API
-        google_user_data = await verify_google_token(data.code)
-        
-        # Проверяем, что получили email
-        if not google_user_data.get("email"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Не удалось получить email из Google аккаунта"
-            )
-        
-        # Ищем пользователя по email в базе данных
-        user_email = google_user_data.get("email")
-        db_user = db.query(User).filter(User.email == user_email).first()
-        
-        # Если пользователь не найден, регистрируем нового
-        if not db_user:
-            # Создаем нового пользователя
-            # Генерируем случайный пароль, так как Google OAuth не использует пароли
-            password = secrets.token_hex(16)
-            hashed_password = get_password_hash(password)
-            
-            # Определяем имя из данных Google, если доступно
-            user_name = google_user_data.get("name", "")
-            
-            # Создаем нового пользователя
-            db_user = User(
-                email=user_email,
-                hashed_password=hashed_password,
-                role="patient",  # По умолчанию роль "patient"
-                auth_provider="google",
-                is_active=True  # Пользователь сразу активен, так как подтвержден через Google
-            )
-            
-            db.add(db_user)
-            db.commit()
-            db.refresh(db_user)
-            
-            # Создаем профиль пациента, если есть имя
-            if user_name:
-                patient_profile = PatientProfile(
-                    user_id=db_user.id,
-                    full_name=user_name
+        # Верифицируем код авторизации и получаем данные пользователя от Google
+        try:
+            google_data = await verify_google_token(data.code)
+        except HTTPException as e:
+            if "invalid_grant" in str(e):
+                # Это часто происходит при повторном использовании кода авторизации
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Google authorization code has already been used or expired. Please try again with a new authentication flow.",
+                    headers={"WWW-Authenticate": "Bearer"},
                 )
-                db.add(patient_profile)
-            
-            # Создаем настройки уведомлений для нового пользователя
-            user_settings = UserNotificationSettings(
-                user_id=db_user.id,
-                email_notifications=True,
-                push_notifications=True,
-                appointment_reminders=True
-            )
-            db.add(user_settings)
-            
-            # Создаем WebSocket токен для нового пользователя
-            try:
-                ws_token = await create_websocket_token(db_user.id, db)
-                print(f"Google Auth: Created WebSocket token for new user {db_user.id}: {ws_token[:10]}...")
-            except Exception as e:
-                print(f"Google Auth: Error creating WebSocket token: {str(e)}")
-                # Не выбрасываем исключение, продолжаем выполнение
-            
-            # Создаем приветственное уведомление для нового пользователя
-            welcome_notification = Notification(
-                user_id=db_user.id,
-                title="Добро пожаловать в систему!",
-                message=f"Здравствуйте{' '+user_name if user_name else ''}! Благодарим за регистрацию в системе онлайн-консультаций vrachiAPP. Здесь вы можете найти врачей различных специальностей и получить консультацию.",
-                type="system",
-                is_viewed=False
-            )
-            db.add(welcome_notification)
-            
-            # Создаем уведомление с инструкциями
-            help_notification = Notification(
-                user_id=db_user.id,
-                title="Как пользоваться системой",
-                message="Для начала работы заполните свой профиль в разделе 'Мой профиль'. После этого вы сможете выбрать врача и начать консультацию.",
-                type="system",
-                is_viewed=False
-            )
-            db.add(help_notification)
-            
-            db.commit()
-            
-            print(f"Google Auth: Created new user {user_email} with ID {db_user.id}")
-            print(f"Google Auth: Registration successful for {user_email}")
-        else:
-            # Если пользователь уже существует, проверяем auth_provider
-            if db_user.auth_provider != "google":
-                # Обновляем auth_provider на "google"
-                db_user.auth_provider = "google"
-                db.commit()
-                print(f"Google Auth: Updated auth provider to Google for {user_email}")
-            
-            print(f"Google Auth: Login successful for {user_email}")
-        
+            # Пробрасываем исходное исключение, если это не invalid_grant
+            raise
+
+        # Аутентифицируем или создаем пользователя на основе данных Google
+        user = await authenticate_google_user(google_data, db)
+
         # Создаем JWT токен для пользователя
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": db_user.email}, expires_delta=access_token_expires
+            data={"sub": user.email, "role": user.role},
+            expires_delta=access_token_expires,
         )
-        
-        # Проверяем наличие непрочитанных уведомлений для пользователя
-        unread_notifications = db.query(Notification).filter(
-            Notification.user_id == db_user.id,
-            Notification.is_viewed == False
-        ).count()
-        
-        if unread_notifications > 0:
-            print(f"Google Auth: User {user_email} has {unread_notifications} unread notifications")
-            
-        # Проверяем, заполнен ли профиль пользователя
-        has_profile = False
-        if db_user.role == "patient":
-            profile = db.query(PatientProfile).filter(PatientProfile.user_id == db_user.id).first()
-            has_profile = profile is not None and profile.full_name is not None
-        elif db_user.role == "doctor":
-            profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == db_user.id).first()
-            has_profile = profile is not None and profile.full_name is not None
-        
-        result = {
-            "access_token": access_token, 
-            "token_type": "bearer"
-        }
-        
-        # Если профиль не заполнен, добавляем флаг для клиента
-        if not has_profile:
-            result["need_profile"] = True
-            
-        return result
-    except HTTPException as e:
-        # Логируем ошибку для отладки
-        print(f"Google Auth: HTTP error - {e.status_code} {e.detail}")
-        raise
+
+        # Возвращаем токен
+        return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
-        # Логируем непредвиденную ошибку
-        print(f"Google Auth: Unexpected error - {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Произошла ошибка при аутентификации через Google"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Google authentication failed: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
@@ -2755,71 +2623,61 @@ async def get_notifications(
 ):
     """
     Получает список уведомлений для текущего пользователя.
-    Возвращает последние 30 уведомлений, отсортированные по дате создания (новые сверху).
     """
-    notifications = (
-        db.query(Notification)
-        .filter(Notification.user_id == current_user.id)
-        .order_by(Notification.created_at.desc())
-        .limit(30)
+    # Получаем заявки на роль врача для текущего пользователя
+    applications = (
+        db.query(DoctorApplication)
+        .filter(DoctorApplication.user_id == current_user.id)
+        .order_by(DoctorApplication.created_at.desc())
         .all()
     )
-    
+
+    # Формируем уведомления на основе заявок
+    notifications = []
+    for app in applications:
+        # Проверяем, просмотрено ли уведомление
+        viewed = (
+            db.query(ViewedNotification)
+            .filter(
+                ViewedNotification.user_id == current_user.id,
+                ViewedNotification.application_id == app.id,
+            )
+            .first()
+            is not None
+        )
+
+        # Формируем заголовок и сообщение в зависимости от статуса заявки
+        title = "Заявка на роль врача"
+        if app.status == "pending":
+            message = "Ваша заявка на роль врача находится на рассмотрении."
+            type_name = "info"
+        elif app.status == "approved":
+            message = "Ваша заявка на роль врача одобрена!"
+            type_name = "success"
+        elif app.status == "rejected":
+            message = f"Ваша заявка на роль врача отклонена. Причина: {app.admin_comment or 'Не указана'}"
+            type_name = "error"
+        else:
+            message = f"Статус заявки изменен на: {app.status}"
+            type_name = "info"
+
+        # Добавляем уведомление в список
+        notifications.append(
+            {
+                "id": app.id,
+                "title": title,
+                "message": message,
+                "type": type_name,
+                "is_viewed": viewed,
+                "created_at": app.created_at,
+            }
+        )
+
+    # Возвращаем список уведомлений
     return {"items": notifications}
 
-@app.get("/notifications/unread-count", response_model=dict)
-async def get_unread_notifications_count(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-):
-    """
-    Возвращает количество непрочитанных уведомлений для текущего пользователя.
-    """
-    count = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_viewed == False
-    ).count()
-    
-    return {"count": count}
 
-# Добавляем функцию для создания уведомления
-async def create_notification(
-    db: Session, 
-    user_id: int, 
-    title: str, 
-    message: str, 
-    notification_type: str = "system",
-    related_id: int = None
-) -> Notification:
-    """
-    Создает новое уведомление для пользователя.
-    
-    Args:
-        db (Session): Сессия базы данных
-        user_id (int): ID пользователя
-        title (str): Заголовок уведомления
-        message (str): Текст уведомления
-        notification_type (str): Тип уведомления (system, message, consultation)
-        related_id (int): ID связанного объекта (опционально)
-        
-    Returns:
-        Notification: Созданное уведомление
-    """
-    notification = Notification(
-        user_id=user_id,
-        title=title,
-        message=message,
-        type=notification_type,
-        is_viewed=False,
-        related_id=related_id
-    )
-    
-    db.add(notification)
-    db.commit()
-    db.refresh(notification)
-    
-    print(f"Created notification for user {user_id}: {title}")
-    return notification
-
+# Эндпоинт для отметки уведомления как прочитанного
 @app.post(
     "/notifications/{notification_id}/view", status_code=status.HTTP_204_NO_CONTENT
 )
@@ -2831,49 +2689,44 @@ async def mark_notification_as_read(
     """
     Отмечает уведомление как прочитанное.
     """
-    # Проверяем, существует ли уведомление и принадлежит ли оно текущему пользователю
-    notification = db.query(Notification).filter(
-        Notification.id == notification_id,
-        Notification.user_id == current_user.id
-    ).first()
-    
-    if not notification:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Уведомление не найдено или у вас нет к нему доступа"
+    # Получаем заявку по ID
+    application = (
+        db.query(DoctorApplication)
+        .filter(
+            DoctorApplication.id == notification_id,
+            DoctorApplication.user_id == current_user.id,
         )
-    
-    # Отмечаем уведомление как прочитанное
-    notification.is_viewed = True
-    db.commit()
-    
-    # Возвращаем 204 No Content
+        .first()
+    )
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Уведомление не найдено"
+        )
+
+    # Проверяем, не было ли уже просмотрено уведомление
+    existing_notification = (
+        db.query(ViewedNotification)
+        .filter(
+            ViewedNotification.user_id == current_user.id,
+            ViewedNotification.application_id == notification_id,
+        )
+        .first()
+    )
+
+    if not existing_notification:
+        # Если нет, создаем новую запись
+        viewed_notification = ViewedNotification(
+            user_id=current_user.id, application_id=notification_id
+        )
+        db.add(viewed_notification)
+        db.commit()
+
+    # Возвращаем 204 No Content (успешно, но без тела ответа)
     return None
 
-@app.post("/notifications/mark-all-read", status_code=status.HTTP_204_NO_CONTENT)
-async def mark_all_notifications_read(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Отмечает все уведомления пользователя как прочитанные.
-    """
-    # Получаем все непрочитанные уведомления
-    notifications = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_viewed == False
-    ).all()
-    
-    # Отмечаем все как прочитанные
-    for notification in notifications:
-        notification.is_viewed = True
-    
-    db.commit()
-    
-    # Возвращаем 204 No Content
-    return None
 
-# Модель для запроса с CSRF токеном для защиты форм
+# Модель запроса с CSRF токеном для защиты форм
 class CsrfProtectedRequest(BaseModel):
     csrf_token: str
 
@@ -3624,66 +3477,20 @@ def get_websocket_docs():
 
 ## Добавляю новый эндпоинт для WebSocket токена
 @app.get("/api/ws-token", response_model=dict)
-async def get_websocket_token(
-    current_user: User = Depends(get_current_user), 
-    db: Session = Depends(get_db),
-    request: Request = None
-):
+async def get_websocket_token(current_user: User = Depends(get_current_user)):
     """
     Создает и возвращает специальный токен для WebSocket соединения.
-    Токен сохраняется в базе данных и имеет ограниченный срок действия.
+    Токен содержит информацию о пользователе и имеет ограниченный срок действия.
     """
-    try:
-        # Удаляем устаревшие токены для этого пользователя
-        expired_tokens = db.query(WebSocketToken).filter(
-            WebSocketToken.user_id == current_user.id,
-            WebSocketToken.expires_at < datetime.utcnow()
-        ).all()
-        
-        if expired_tokens:
-            for token in expired_tokens:
-                db.delete(token)
-            db.commit()
-        
-        # Генерируем новый случайный токен
-        token_value = secrets.token_urlsafe(32)
-        
-        # Устанавливаем срок действия токена (5 минут)
-        expires_at = datetime.utcnow() + timedelta(minutes=5)
-        
-        # Создаем запись в базе данных
-        db_token = WebSocketToken(
-            user_id=current_user.id,
-            token=token_value,
-            expires_at=expires_at
-        )
-        
-        # Сохраняем в базе данных
-        db.add(db_token)
-        db.commit()
-        db.refresh(db_token)
-        
-        # Возвращаем токен клиенту
-        return {"token": token_value, "expires_in": 300}  # 300 секунд = 5 минут
-    except HTTPException as e:
-        # Специальная обработка ошибки "пользователь не найден"
-        if e.status_code == 401 and "X-Registration-Required" in e.headers:
-            # Если это эндпоинт вызван из WebSocket соединения,
-            # возвращаем информацию о необходимости заново авторизоваться
-            print("Требуется регистрация/авторизация для получения WebSocket токена")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Требуется регистрация или повторная авторизация. Обновите страницу и войдите снова.",
-                headers={"WWW-Authenticate": "Bearer", "X-Registration-Required": "true"},
-            )
-        # Для других ошибок просто передаем исключение дальше
-        raise
-    except Exception as e:
-        print(f"Непредвиденная ошибка при создании WebSocket токена: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Произошла ошибка при создании токена. Пожалуйста, попробуйте позже."
-        )
+    # Создаем токен с коротким сроком жизни (5 минут) специально для WebSocket
+    access_token_expires = timedelta(minutes=5)
+    access_token = create_access_token(
+        data={"sub": current_user.email, "user_id": current_user.id}, 
+        expires_delta=access_token_expires
+    )
+    
+    # Возвращаем токен клиенту
+    return {"token": access_token, "expires_in": 300}  # 300 секунд = 5 минут
 
 # Эндпоинт для получения публичного профиля Пациента по ID пользователя Пациента. Не требует авторизации.
 @app.get("/patients/{user_id}/profile", response_model=PatientProfileResponse)
@@ -3791,8 +3598,24 @@ async def get_consultation_messages_bulk(
 ):
     """
     Получить полную информацию о сообщениях консультации за один запрос.
-    Это оптимизирует загрузку, получая все нужные данные за один запрос.
+    
+    Возвращает словарь, содержащий:
+    - Список сообщений
+    - Информацию о консультации
+    - Информацию о профилях участников (доктор, пациент)
+    - Данные о последней активности
+    
+    Это позволяет оптимизировать загрузку, получая все нужные данные за один запрос.
     """
+    
+    # Получаем информацию о консультации
+    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
+    
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Консультация не найдена")
+    
+    # Проверяем права доступа
+    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
     try:
         # Получаем информацию о консультации
         consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
@@ -3805,14 +3628,19 @@ async def get_consultation_messages_bulk(
             raise HTTPException(status_code=403, detail="У вас нет доступа к этой консультации")
         
         # Загружаем все сообщения консультации
-        messages = db.query(Message).filter(Message.consultation_id == consultation_id).order_by(Message.sent_at.asc()).all()
+        messages = (
+            db.query(Message)
+            .filter(Message.consultation_id == consultation_id)
+            .order_by(Message.sent_at.asc())
+            .all()
+        )
         
         # Получаем данные профилей участников
-        doctor = db.query(User).filter(User.id == consultation.doctor_id).first()
-        patient = db.query(User).filter(User.id == consultation.patient_id).first()
-        
         doctor_profile = None
         patient_profile = None
+        
+        doctor = db.query(User).filter(User.id == consultation.doctor_id).first()
+        patient = db.query(User).filter(User.id == consultation.patient_id).first()
         
         if doctor:
             doctor_profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == doctor.id).first()
@@ -3820,17 +3648,24 @@ async def get_consultation_messages_bulk(
         if patient:
             patient_profile = db.query(PatientProfile).filter(PatientProfile.user_id == patient.id).first()
         
-        # Помечаем непрочитанные сообщения как прочитанные
-        unread_messages = db.query(Message).filter(
-            Message.consultation_id == consultation_id,
-            Message.sender_id != current_user.id,
-            Message.is_read == False
-        ).all()
-        
-        if unread_messages:
-            for message in unread_messages:
-                message.is_read = True
-            db.commit()
+        # Помечаем сообщения как прочитанные, если запрос делает собеседник
+        if messages:
+            # Получаем все непрочитанные сообщения, отправленные НЕ текущим пользователем
+            unread_messages = (
+                db.query(Message)
+                .filter(
+                    Message.consultation_id == consultation_id,
+                    Message.sender_id != current_user.id,
+                    Message.is_read == False
+                )
+                .all()
+            )
+            
+            # Если есть непрочитанные сообщения, помечаем их как прочитанные
+            if unread_messages:
+                for message in unread_messages:
+                    message.is_read = True
+                db.commit()
         
         # Формируем информацию о последней активности
         last_activity = None
@@ -3870,178 +3705,3 @@ async def get_consultation_messages_bulk(
             "participants": {
                 "doctor": {
                     "id": doctor.id if doctor else None,
-                    "full_name": doctor_profile.full_name if doctor_profile else "Врач",
-                    "avatar_path": doctor.avatar_path if doctor else None
-                },
-                "patient": {
-                    "id": patient.id if patient else None,
-                    "full_name": patient_profile.full_name if patient_profile else "Пациент",
-                    "avatar_path": patient.avatar_path if patient else None
-                }
-            },
-            "last_activity": last_activity
-        }
-        
-        return response_data
-    except HTTPException:
-        # Пробрасываем HTTP исключения дальше
-        raise
-    except Exception as e:
-        print(f"Ошибка при получении информации о консультации: {str(e)}")
-        raise HTTPException(status_code=500, detail="Ошибка сервера при получении данных консультации")
-
-# Добавляем функцию для создания WebSocket токена после импортов и основных настроек
-# Добавляем примерно на строке 120, перед существующими определениями функций
-
-async def create_websocket_token(user_id: int, db: Session) -> str:
-    """
-    Создает новый WebSocket токен для пользователя и сохраняет его в базе данных.
-    
-    Args:
-        user_id (int): ID пользователя
-        db (Session): сессия базы данных
-        
-    Returns:
-        str: Значение созданного токена
-    """
-    # Удаляем устаревшие токены для этого пользователя
-    expired_tokens = db.query(WebSocketToken).filter(
-        WebSocketToken.user_id == user_id,
-        WebSocketToken.expires_at < datetime.utcnow()
-    ).all()
-    
-    if expired_tokens:
-        for token in expired_tokens:
-            db.delete(token)
-        db.commit()
-    
-    # Генерируем новый случайный токен
-    token_value = secrets.token_urlsafe(32)
-    
-    # Устанавливаем срок действия токена (30 минут)
-    expires_at = datetime.utcnow() + timedelta(minutes=30)
-    
-    # Создаем запись в базе данных
-    db_token = WebSocketToken(
-        user_id=user_id,
-        token=token_value,
-        expires_at=expires_at
-    )
-    
-    # Сохраняем в базе данных
-    db.add(db_token)
-    db.commit()
-    
-    return token_value
-
-@app.post(
-    "/api/consultations/{consultation_id}/messages",
-    response_model=MessageResponse,
-    tags=["consultations"],
-)
-async def send_message(
-    consultation_id: int,
-    message_data: MessageCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Отправляет сообщение в консультацию.
-    Проверяет, есть ли у пользователя права на отправку сообщений в эту консультацию.
-    """
-    # Проверяем существование консультации
-    consultation = db.query(Consultation).filter(Consultation.id == consultation_id).first()
-    if not consultation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Консультация не найдена"
-        )
-
-    # Проверяем, что текущий пользователь является участником консультации
-    if current_user.id != consultation.patient_id and current_user.id != consultation.doctor_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="У вас нет доступа к этой консультации",
-        )
-
-    # Проверяем статус консультации
-    if consultation.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Отправка сообщений доступна только для активных консультаций",
-        )
-
-    # Проверяем, не превышено ли максимальное количество сообщений
-    if consultation.message_count >= consultation.message_limit:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Превышен лимит сообщений для этой консультации",
-        )
-
-    # Создаем сообщение
-    db_message = Message(
-        consultation_id=consultation_id,
-        sender_id=current_user.id,
-        content=message_data.content,
-        is_read=False,  # Новое сообщение не прочитано
-    )
-
-    # Увеличиваем счетчик сообщений
-    consultation.message_count += 1
-
-    # Сохраняем сообщение и обновленную консультацию
-    db.add(db_message)
-    db.commit()
-    db.refresh(db_message)
-
-    # Определяем получателя сообщения
-    recipient_id = consultation.patient_id if current_user.id == consultation.doctor_id else consultation.doctor_id
-
-    # Определяем типы пользователей для уведомления
-    sender_type = "доктор" if current_user.id == consultation.doctor_id else "пациент"
-    
-    # Получаем данные об отправителе
-    sender_name = "Доктор"
-    if current_user.id == consultation.doctor_id:
-        doctor = db.query(DoctorProfile).filter(DoctorProfile.user_id == current_user.id).first()
-        if doctor and doctor.full_name:
-            sender_name = f"Доктор {doctor.full_name}"
-    else:
-        patient = db.query(PatientProfile).filter(PatientProfile.user_id == current_user.id).first()
-        if patient and patient.full_name:
-            sender_name = patient.full_name
-
-    # Создаем уведомление о новом сообщении
-    await create_notification(
-        db=db,
-        user_id=recipient_id,
-        title="Новое сообщение",
-        message=f"{sender_name}: {message_data.content[:50]}{'...' if len(message_data.content) > 50 else ''}",
-        notification_type="message",
-        related_id=consultation_id
-    )
-
-    # Пытаемся отправить сообщение через WebSocket
-    try:
-        # Формируем данные сообщения
-        message_data = {
-            "id": db_message.id,
-            "consultation_id": db_message.consultation_id,
-            "sender_id": db_message.sender_id,
-            "content": db_message.content,
-            "sent_at": db_message.sent_at.isoformat(),
-            "is_read": db_message.is_read
-        }
-        
-        # Отправляем через broadcast функцию
-        await broadcast_consultation_update(
-            consultation_id=consultation_id,
-            update_data={
-                "type": "new_message",
-                "message": message_data
-            }
-        )
-    except Exception as e:
-        print(f"Error broadcasting message: {str(e)}")
-        # Не выбрасываем исключение, продолжаем выполнение
-
-    return db_message

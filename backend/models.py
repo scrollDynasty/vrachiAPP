@@ -1,7 +1,7 @@
 # backend/models.py
 
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, DateTime, Float, JSON, UniqueConstraint, CheckConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime # Импортируем datetime для работы с датой и временем
@@ -12,24 +12,42 @@ load_dotenv() # Загружаем переменные из .env файла
 # URL для подключения к базе данных.
 # Порядок приоритета: переменная окружения DATABASE_URL, затем значение из .env, затем запасной вариант.
 # Убедись, что в .env или в переменной окружения указана твоя локальная строка подключения с localhost.
-DATABASE_URL = os.getenv("DATABASE_URL", os.getenv("DATABASE_URL", "mysql+pymysql://vrachi_user:1435111926Ss..@localhost:3306/online_doctors_db")) # <-- ТВОЯ СТРОКА ПОДКЛЮЧЕНИЯ. Убедись, что здесь 'localhost' и правильный пароль.
 
+# ВАЖНО: Для настройки MySQL используйте один из следующих способов:
+# 1. Запустите скрипт backend/init_mysql_db.py, который автоматически настроит базу данных
+# 2. Вручную выполните команды SQL для создания базы данных и пользователя
+# 3. Укажите свои настройки подключения в .env файле
 
-# Проверяем, что DATABASE_URL установлен. Если нет, выбрасываем ошибку при старте.
-if DATABASE_URL is None:
-    raise ValueError("DATABASE_URL environment variable is not set. Make sure you have a .env file with DATABASE_URL, or it's set otherwise.")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "mysql+pymysql://vrachi_user:password@localhost:3306/online_doctors_db"
+)
 
+# Создаем подключение к базе данных (SQLAlchemy Engine)
+# connect_args={"check_same_thread": False} нужен только для SQLite, для MySQL он не нужен
+engine = create_engine(
+    DATABASE_URL, 
+    pool_size=20, 
+    max_overflow=0,
+    pool_pre_ping=True,
+    pool_recycle=3600,  # Переподключаться каждый час, чтобы избежать разрыва соединений
+    echo=False  # Установите True для отладки SQL запросов
+)
 
-# Создание движка базы данных
-# pool_pre_ping=True помогает избежать проблем с "отвалившимся" соединением после долгого простоя
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-# Создание базового класса для декларативного определения моделей SQLAlchemy
+# Создаем базовый класс моделей
 Base = declarative_base()
 
-# Создание фабрики сессий для работы с базой данных
+# Создаем класс SessionLocal для создания сессий, которые мы будем использовать для работы с БД.
+# autocommit=False означает, что мы должны явно вызывать commit()
+# autoflush=False означает, что мы должны явно вызывать flush() при необходимости
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Зависимость для получения объекта сессии БД
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db # Возвращаем объект сессии (через yield для использования как зависимость FastAPI)
+    finally:
+        db.close() # После завершения запроса закрываем сессию
 
 # --- Определение моделей (таблиц базы данных) ---
 
@@ -302,14 +320,24 @@ class PendingUser(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+# Добавляем новую модель в конце файла перед созданием таблиц
+class WebSocketToken(Base):
+    """
+    Модель для хранения токенов WebSocket соединений.
+    Каждый токен связан с пользователем и имеет ограниченный срок действия.
+    """
+    __tablename__ = "ws_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    
+    # Индекс для быстрого поиска по токену и проверки срока действия
+    __table_args__ = (
+        Index('idx_ws_token_expiry', 'token', 'expires_at'),
+    )
+
+
 # TODO: Определить модели для других сущностей:
-
-
-# --- Вспомогательная функция для получения сессии ---
-# Эту функцию мы будем использовать в FastAPI для получения сессии БД через зависимость
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()

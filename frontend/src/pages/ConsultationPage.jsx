@@ -90,10 +90,20 @@ function ConsultationPage() {
         return;
       }
       
+      // Проверяем localStorage - если отзыв уже был добавлен ранее
+      const reviewKey = `review_added_${consultationId}`;
+      if (localStorage.getItem(reviewKey) === 'true') {
+        console.log('Отзыв уже был добавлен ранее (из localStorage в ConsultationPage)');
+        setHasReview(true);
+        return;
+      }
+      
       const response = await api.get(`/api/consultations/${consultationId}/review`);
       
       // Если пришел 200 статус, значит отзыв есть
       setHasReview(true);
+      // Сохраняем в localStorage для будущих проверок
+      localStorage.setItem(reviewKey, 'true');
       
     } catch (error) {
       // Если 404, то отзыва нет, что нормально - не выводим ошибку в консоль
@@ -108,8 +118,20 @@ function ConsultationPage() {
   // Начало консультации (активация)
   const startConsultation = async () => {
     try {
+      // Показываем индикатор загрузки
+      toast.loading('Начинаем консультацию...');
+      
       const response = await api.post(`/api/consultations/${consultationId}/start`);
+      
+      // Обновляем локальное состояние
       setConsultation(response.data);
+      
+      // Очищаем предыдущие состояния, связанные с отзывами и проверками
+      sessionStorage.removeItem(`review_check_${consultationId}`);
+      sessionStorage.removeItem(`review_shown_${consultationId}`);
+      
+      // Закрываем индикатор загрузки
+      toast.dismiss();
       
       // Показываем красивое уведомление в правом верхнем углу
       toast.success('Консультация успешно началась', {
@@ -129,10 +151,29 @@ function ConsultationPage() {
         // Не показываем ошибку пользователю, это некритичная операция
       }
       
-      // Принудительно обновляем компонент чата
-      handleConsultationUpdated();
+      // Сбрасываем кэш сообщений и состояние для чистого начала
+      try {
+        const chatRefreshKey = `message_request_count_${consultationId}`;
+        const firstRequestTimeKey = `message_first_request_time_${consultationId}`;
+        const lastActivityKey = `last_activity_time_${consultationId}`;
+        
+        // Сбрасываем счетчики запросов
+        sessionStorage.removeItem(chatRefreshKey);
+        sessionStorage.removeItem(firstRequestTimeKey);
+        sessionStorage.removeItem(lastActivityKey);
+      } catch (storageError) {
+        console.warn('Ошибка при очистке счетчиков запросов:', storageError);
+      }
+      
+      // Принудительно обновляем компонент чата с небольшой задержкой
+      setTimeout(() => {
+        handleConsultationUpdated();
+      }, 300);
       
     } catch (error) {
+      // Закрываем индикатор загрузки
+      toast.dismiss();
+      
       console.error('Error starting consultation:', error);
       
       const errorMessage = error.response?.data?.detail || 
@@ -142,6 +183,18 @@ function ConsultationPage() {
     }
   };
   
+  // Позволяет дочерним компонентам открыть модалку отзыва
+  useEffect(() => {
+    window.showReviewModal = (callback) => {
+      setIsReviewModalOpen(true);
+      window.reviewCallback = callback;
+    };
+    return () => { 
+      window.showReviewModal = undefined;
+      window.reviewCallback = undefined;
+    };
+  }, []);
+
   // Отправка отзыва о консультации
   const submitReview = async () => {
     // Проверяем заполнение обязательных полей
@@ -164,12 +217,24 @@ function ConsultationPage() {
         comment: reviewComment
       });
       
+      // Сохраняем информацию об отправке отзыва в localStorage
+      localStorage.setItem(`review_added_${consultationId}`, 'true');
+      sessionStorage.setItem(`review_added_${consultationId}`, 'true');
+      
       toast.success('Спасибо за ваш отзыв!');
       setIsReviewModalOpen(false);
       setHasReview(true);
       
-      // Обновляем данные консультации
-      await fetchConsultation();
+      // Вызываем колбэк, если есть
+      if (typeof window.reviewCallback === 'function') {
+        window.reviewCallback(true);
+      }
+      
+      // Перенаправляем на главную страницу
+      toast.success('Перенаправление на главную страницу...');
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
       
     } catch (error) {
       console.error('Error submitting review:', error);
@@ -178,6 +243,11 @@ function ConsultationPage() {
         'Не удалось отправить отзыв.';
         
       toast.error(errorMessage);
+      
+      // Вызываем колбэк с false, если есть
+      if (typeof window.reviewCallback === 'function') {
+        window.reviewCallback(false);
+      }
     } finally {
       setSubmittingReview(false);
     }
@@ -189,29 +259,71 @@ function ConsultationPage() {
       setLoading(true);
       await fetchConsultation();
       setLoading(false);
+      
+      // Дополнительная проверка отзыва через 1 секунду после загрузки
+      setTimeout(async () => {
+        // Принудительно проверяем наличие отзыва в localStorage
+        const reviewKey = `review_added_${consultationId}`;
+        if (localStorage.getItem(reviewKey) === 'true') {
+          console.log('Отзыв уже существует в localStorage, устанавливаем hasReview = true');
+          setHasReview(true);
+          setIsReviewModalOpen(false); // Закрываем модальное окно, если оно открыто
+          return;
+        }
+        
+        // Повторно проверяем через API
+        try {
+          const response = await api.get(`/api/consultations/${consultationId}/review`);
+          if (response.data && response.data.id) {
+            console.log('Повторная проверка API: отзыв существует');
+            localStorage.setItem(reviewKey, 'true');
+            sessionStorage.setItem(reviewKey, 'true');
+            setHasReview(true);
+            setIsReviewModalOpen(false); // Закрываем модальное окно, если оно открыто
+          }
+        } catch (error) {
+          if (error.response?.status !== 404) {
+            console.error('Ошибка при повторной проверке отзыва:', error);
+          }
+        }
+      }, 1000);
     };
     
     loadData();
   }, [consultationId]);
   
-  // Позволяет дочерним компонентам открыть модалку отзыва
+  // Автоматически открываем отзыв после завершения консультации (только если пациент, нет отзыва и нет записи в localStorage)
   useEffect(() => {
-    window.showReviewModal = () => setIsReviewModalOpen(true);
-    return () => { window.showReviewModal = undefined; };
-  }, []);
-
-  // Автоматически открываем отзыв после завершения консультации (если пациент и нет отзыва)
-  useEffect(() => {
+    // Проверяем localStorage перед открытием модального окна
+    const reviewKey = `review_added_${consultationId}`;
+    const reviewShownKey = `review_shown_${consultationId}`;
+    
+    const hasReviewInLocalStorage = localStorage.getItem(reviewKey) === 'true';
+    const reviewShownRecently = sessionStorage.getItem(reviewShownKey) === 'true';
+    
+    console.log('Проверка перед автоматическим открытием модального окна:', {
+      hasReview,
+      hasReviewInLocalStorage,
+      reviewShownRecently,
+      isPatient,
+      status: consultation?.status
+    });
+    
     if (
       consultation &&
       consultation.status === 'completed' &&
       isPatient &&
       !hasReview &&
+      !hasReviewInLocalStorage &&
+      !reviewShownRecently &&
       !isReviewModalOpen
     ) {
+      console.log('Автоматически открываем модальное окно отзыва');
+      // Отмечаем, что модальное окно было показано в этой сессии
+      sessionStorage.setItem(reviewShownKey, 'true');
       setTimeout(() => setIsReviewModalOpen(true), 500);
     }
-  }, [consultation, isPatient, hasReview, isReviewModalOpen]);
+  }, [consultation, isPatient, hasReview, isReviewModalOpen, consultationId]);
   
   // Функция обработки обновления консультации
   const handleConsultationUpdated = () => {
@@ -324,7 +436,8 @@ function ConsultationPage() {
       
       {/* Модальное окно для отправки отзыва */}
       <Modal 
-        isOpen={isReviewModalOpen} 
+        isOpen={isReviewModalOpen && 
+               localStorage.getItem(`review_added_${consultationId}`) !== 'true'} 
         onClose={() => setIsReviewModalOpen(false)}
         closeButton={consultation?.status === 'completed' && !hasReview ? false : true}
         isDismissable={consultation?.status === 'completed' && !hasReview ? false : true}

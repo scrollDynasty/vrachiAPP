@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardBody, Table, TableHeader, TableColumn, TableBody, TableRow, TableCell, Chip, Tabs, Tab, Spinner, Divider, Button, Avatar, Badge } from '@nextui-org/react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore';
+import useChatStore from '../stores/chatStore';
 import api from '../api';
 
 // Компонент страницы истории консультаций и платежей
 function HistoryPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const { unreadMessages, fetchUnreadCounts } = useChatStore();
   const [activeTab, setActiveTab] = useState("consultations");
   const [consultations, setConsultations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -63,15 +65,34 @@ function HistoryPage() {
         }
         
         // Загружаем данные о пациентах, если пользователь - врач
-        // Примечание: этот функционал может потребовать дополнительного API на бэкенде
         if (user.role === 'doctor' && patientIds.size > 0) {
-          // Заглушка, т.к. у нас нет API для получения данных пациентов по ID
           const patientData = {};
-          patientIds.forEach(id => {
-            patientData[id] = { full_name: `Пациент #${id}` };
-          });
+          const avatarData = { ...userAvatars };
+          
+          for (const patientId of patientIds) {
+            try {
+              const response = await api.get(`/patients/${patientId}/profile`);
+              patientData[patientId] = response.data;
+              
+              // Сохраняем путь к аватару
+              if (response.data.avatar_path) {
+                avatarData[patientId] = `http://127.0.0.1:8000${response.data.avatar_path}`;
+              }
+            } catch (error) {
+              console.error(`Ошибка загрузки данных о пациенте ${patientId}:`, error);
+              patientData[patientId] = { full_name: `Пациент #${patientId}` };
+            }
+          }
           
           setPatientProfiles(patientData);
+          setUserAvatars(avatarData);
+        }
+        
+        // Fetch unread messages - обновленный безопасный вызов с обработкой ошибок
+        try {
+          await fetchUnreadCounts();
+        } catch (error) {
+          console.warn('Не удалось загрузить непрочитанные сообщения, используем кэшированные данные:', error);
         }
         
       } catch (error) {
@@ -131,10 +152,14 @@ function HistoryPage() {
   const getParticipantName = (consultation) => {
     if (user.role === 'patient') {
       const doctorProfile = doctorProfiles[consultation.doctor_id];
-      return doctorProfile ? doctorProfile.full_name : `Врач #${consultation.doctor_id}`;
+      return doctorProfile && doctorProfile.full_name 
+        ? doctorProfile.full_name 
+        : `Врач #${consultation.doctor_id}`;
     } else {
       const patientProfile = patientProfiles[consultation.patient_id];
-      return patientProfile ? patientProfile.full_name : `Пациент #${consultation.patient_id}`;
+      return patientProfile && patientProfile.full_name 
+        ? patientProfile.full_name 
+        : `Пациент #${consultation.patient_id}`;
     }
   };
   
@@ -147,39 +172,59 @@ function HistoryPage() {
     }
   };
   
+  // Проверка на наличие непрочитанных сообщений
+  const hasUnreadMessages = (consultationId) => {
+    return unreadMessages[consultationId] && unreadMessages[consultationId] > 0;
+  };
+  
+  // Получение количества непрочитанных сообщений
+  const getUnreadCount = (consultationId) => {
+    return unreadMessages[consultationId] || 0;
+  };
+  
   return (
-    <div className="max-w-screen-xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6 text-center">История</h1>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold mb-6">История</h1>
       
-      <Card>
-        <CardHeader className="pb-0 pt-4">
-          <Tabs 
-            selectedKey={activeTab} 
-            onSelectionChange={setActiveTab}
-            variant="underlined"
-            color="primary"
-            fullWidth
-          >
-            <Tab key="consultations" title="Консультации" />
-          </Tabs>
-        </CardHeader>
-        
-        <Divider className="mt-4" />
-        
-        <CardBody>
-          {activeTab === "consultations" && (
-            <>
+      <Tabs 
+        selectedKey={activeTab}
+        onSelectionChange={setActiveTab}
+        variant="underlined"
+        classNames={{
+          tab: "py-2 px-4",
+          tabContent: "group-data-[selected=true]:text-primary",
+          cursor: "bg-primary",
+          panel: "pt-3"
+        }}
+      >
+        <Tab 
+          key="consultations" 
+          title="Консультации" 
+          className="py-1 px-0"
+        >
+          <Card shadow="sm" className="mt-4">
+            <CardHeader className="bg-gray-50 px-5 py-3">
+              <h2 className="text-lg font-medium">История консультаций</h2>
+            </CardHeader>
+            <CardBody className="p-0">
               {loading ? (
                 <div className="flex justify-center py-8">
-                  <Spinner size="lg" />
+                  <Spinner size="lg" color="primary" />
                 </div>
               ) : error ? (
-                <div className="text-danger text-center py-8">
-                  {error}
-                </div>
+                <div className="py-8 px-5 text-danger text-center">{error}</div>
               ) : consultations.length === 0 ? (
-                <div className="text-gray-500 text-center py-8">
-                  У вас пока нет ни одной консультации
+                <div className="py-8 px-5 text-center text-gray-500">
+                  <p>У вас пока нет консультаций.</p>
+                  {user.role === 'patient' && (
+                    <Button 
+                      color="primary" 
+                      className="mt-4"
+                      onPress={() => navigate('/search-doctors')}
+                    >
+                      Найти врача
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Table aria-label="История консультаций">
@@ -237,42 +282,46 @@ function HistoryPage() {
                           <div className="text-sm flex flex-col">
                             <span>{item.message_count} / {item.message_limit}</span>
                             {item.message_count > 0 && item.status === 'active' && (
-                              <span className="text-xs text-success">Есть сообщения</span>
+                              hasUnreadMessages(item.id) ? (
+                                <Badge content={getUnreadCount(item.id)} color="danger" variant="flat" size="sm">
+                                  <span className="text-xs text-success">Новые сообщения</span>
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-success">Есть сообщения</span>
+                              )
                             )}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex gap-2">
-                            <Button 
-                              size="sm" 
-                              color="primary" 
-                              variant="flat"
-                              onPress={() => goToConsultation(item.id)}
-                            >
-                              {item.status === 'pending' ? 'Перейти' : 
-                               item.status === 'active' ? 'Продолжить' : 'Просмотреть'}
-                            </Button>
-                            {item.status === 'active' && (
-                              <Button
-                                size="sm"
-                                color="success"
-                                variant="light"
-                                onPress={() => goToConsultation(item.id)}
-                              >
-                                Чат
-                              </Button>
-                            )}
-                          </div>
+                          <Button 
+                            color="primary" 
+                            size="sm" 
+                            variant="light"
+                            onPress={() => goToConsultation(item.id)}
+                          >
+                            {hasUnreadMessages(item.id) ? "Прочитать" : "Открыть"}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
               )}
-            </>
-          )}
-        </CardBody>
-      </Card>
+            </CardBody>
+          </Card>
+        </Tab>
+        <Tab key="payments" title="Платежи" className="py-1 px-0">
+          <Card shadow="sm" className="mt-4">
+            <CardHeader className="bg-gray-50 px-5 py-3">
+              <h2 className="text-lg font-medium">История платежей</h2>
+            </CardHeader>
+            <CardBody className="px-5 py-8 text-center text-gray-500">
+              {/* Заглушка пока не реализована история платежей */}
+              <p>История платежей будет доступна в ближайшее время</p>
+            </CardBody>
+          </Card>
+        </Tab>
+      </Tabs>
     </div>
   );
 }

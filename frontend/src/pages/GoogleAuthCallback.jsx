@@ -6,9 +6,10 @@ import GoogleProfileForm from '../components/GoogleProfileForm';
 
 function GoogleAuthCallback() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [status, setStatus] = useState('processing');
-  const [codeProcessed, setCodeProcessed] = useState(false); // Флаг обработки кода
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   
   // Get auth functions and state from store
   const processGoogleAuth = useAuthStore(state => state.processGoogleAuth);
@@ -17,45 +18,93 @@ function GoogleAuthCallback() {
   const error = useAuthStore(state => state.error);
   
   useEffect(() => {
-    const processAuth = async () => {
+    // Функция для проверки, был ли код уже обработан
+    const checkProcessedCodes = (code) => {
       try {
-        // Если пользователь уже аутентифицирован, просто переходим дальше
+        const processedCodes = JSON.parse(sessionStorage.getItem('processedGoogleCodes') || '[]');
+        return processedCodes.includes(code);
+      } catch (e) {
+        console.error('Error checking processed codes:', e);
+        return false;
+      }
+    };
+    
+    // Функция для добавления кода в список обработанных
+    const addToProcessedCodes = (code) => {
+      try {
+        const processedCodes = JSON.parse(sessionStorage.getItem('processedGoogleCodes') || '[]');
+        if (!processedCodes.includes(code)) {
+          processedCodes.push(code);
+          sessionStorage.setItem('processedGoogleCodes', JSON.stringify(processedCodes));
+        }
+      } catch (e) {
+        console.error('Error adding to processed codes:', e);
+      }
+    };
+    
+    const processAuth = async () => {
+      // Если процесс уже запущен, прерываем выполнение
+      if (isProcessing) {
+        console.log('Authentication is already in progress, skipping');
+        return;
+      }
+      
+      // Если пользователь уже аутентифицирован, перенаправляем его
+      if (isAuthenticated) {
+        console.log("User already authenticated, redirecting");
+        setStatus('success');
+        if (!needsProfileUpdate) {
+          setTimeout(() => {
+            navigate('/');
+          }, 1000);
+        }
+        return;
+      }
+      
+      // Получаем код из URL
+      const code = searchParams.get('code');
+      
+      // Если код отсутствует, показываем ошибку
+      if (!code) {
+        console.error("No authorization code found in URL");
+        setStatus('error');
+        setErrorMessage('Код авторизации отсутствует. Пожалуйста, попробуйте войти снова.');
+        return;
+      }
+      
+      // Проверяем, не обрабатывался ли уже этот код
+      if (checkProcessedCodes(code)) {
+        console.log('This auth code was already processed');
+        
+        // Если пользователь аутентифицирован, просто перенаправляем
         if (isAuthenticated) {
-          console.log("User already authenticated, skipping auth code processing");
           setStatus('success');
-          if (!needsProfileUpdate) {
-            setTimeout(() => {
-              navigate('/');
-            }, 1500);
-          }
+          navigate('/', { replace: true });
           return;
         }
         
-        // Extract the authorization code from URL params
-        const code = searchParams.get('code');
+        // Иначе перенаправляем на страницу входа
+        setStatus('error');
+        setErrorMessage('Этот код авторизации уже был использован. Пожалуйста, войдите снова.');
+        setTimeout(() => {
+          navigate('/login', { replace: true });
+        }, 2000);
+        return;
+      }
+      
+      // Помечаем код как обрабатываемый
+      setIsProcessing(true);
+      
+      try {
+        // Добавляем код в список обработанных перед отправкой запроса
+        addToProcessedCodes(code);
         
-        if (!code) {
-          console.error("No authorization code found in URL");
-          setStatus('error');
-          return;
-        }
+        console.log(`Processing Google auth code: ${code.substring(0, 10)}...`);
         
-        // Проверяем, что код еще не был обработан
-        if (codeProcessed) {
-          console.log("Code already processed, skipping...");
-          return;
-        }
-        
-        // Устанавливаем флаг обработки
-        setCodeProcessed(true);
-        
-        // Очищаем URL от параметров, чтобы предотвратить повторное использование кода
-        setSearchParams({});
-        
-        // Call the store function to process the Google auth code
+        // Вызываем метод авторизации из стора
         await processGoogleAuth(code);
         
-        // If successful, set status
+        // Если успешно, обновляем статус
         setStatus('success');
         
         // Если не требуется заполнение профиля, перенаправляем пользователя
@@ -67,7 +116,27 @@ function GoogleAuthCallback() {
       } catch (error) {
         console.error('Google auth processing failed:', error);
         
-        // Проверяем, если пользователь уже аутентифицирован, несмотря на ошибку
+        // Если ошибка связана с истекшим кодом, перенаправляем на повторную авторизацию
+        if (error.message?.includes('истек') || error.message?.includes('invalid_grant')) {
+          setStatus('error');
+          setErrorMessage(error.message || 'Код авторизации истек. Пожалуйста, попробуйте войти снова.');
+          setTimeout(() => {
+            navigate('/login', { replace: true });
+          }, 2000);
+          return;
+        }
+        
+        // Если код уже был обработан, но пользователь не авторизован
+        if (error.message?.includes('уже был обработан')) {
+          setStatus('error');
+          setErrorMessage(error.message);
+          setTimeout(() => {
+            navigate('/login', { replace: true });
+          }, 2000);
+          return;
+        }
+        
+        // Проверяем, если пользователь все же аутентифицирован, несмотря на ошибку
         if (isAuthenticated) {
           console.log("Authentication succeeded despite error, continuing");
           setStatus('success');
@@ -78,22 +147,46 @@ function GoogleAuthCallback() {
           }
         } else {
           setStatus('error');
-          
-          // Если ошибка связана с повторным использованием кода, перенаправляем на /login
-          if (error && error.message && error.message.includes("invalid_grant")) {
-            setTimeout(() => {
-              navigate('/login');
-            }, 2000);
-          }
+          setErrorMessage(error.message || 'Произошла ошибка при обработке авторизации через Google');
         }
+      } finally {
+        setIsProcessing(false);
       }
     };
     
+    // Очищаем старые коды (если прошло больше 24 часов)
+    const clearOldCodes = () => {
+      try {
+        const lastCleared = sessionStorage.getItem('lastCodeClearing');
+        const now = Date.now();
+        
+        if (!lastCleared || now - parseInt(lastCleared, 10) > 24 * 60 * 60 * 1000) {
+          sessionStorage.setItem('processedGoogleCodes', '[]');
+          sessionStorage.setItem('lastCodeClearing', now.toString());
+        }
+      } catch (e) {
+        // Игнорируем ошибки очистки
+      }
+    };
+    
+    clearOldCodes();
     processAuth();
-  }, [searchParams, processGoogleAuth, navigate, codeProcessed, isAuthenticated, needsProfileUpdate, error]);
+  }, [processGoogleAuth, navigate, isProcessing, isAuthenticated, needsProfileUpdate, searchParams]);
   
   // Обработчик завершения заполнения профиля
-  const handleProfileComplete = () => {
+  const handleProfileComplete = async () => {
+    // Ensure token is applied properly before navigation
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        const { setAuthToken } = await import('../api');
+        setAuthToken(token);
+        console.log("Re-applied auth token after profile completion");
+      }
+    } catch (err) {
+      console.error("Error re-applying token:", err);
+    }
+    
     // Перенаправляем на главную
     navigate('/');
   };
@@ -140,8 +233,14 @@ function GoogleAuthCallback() {
             </div>
             <h2 className="text-xl font-semibold text-gray-800">Ошибка авторизации</h2>
             <p className="mt-2 text-gray-600">
-              {error || "Произошла ошибка при обработке авторизации через Google. Пожалуйста, попробуйте еще раз."}
+              {errorMessage || error || "Произошла ошибка при обработке авторизации через Google. Пожалуйста, попробуйте еще раз."}
             </p>
+            <button 
+              onClick={() => navigate('/login')}
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              Вернуться на страницу входа
+            </button>
           </CardBody>
         </Card>
       )}

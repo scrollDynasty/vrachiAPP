@@ -16,6 +16,25 @@ const api = axios.create({
 // Добавляем интерцепторы для логирования запросов
 api.interceptors.request.use(
   config => {
+    // Проверяем запросы к несуществующим эндпоинтам
+    if (config.url && config.url.includes('/token/ws')) {
+      console.error('🔴 Попытка запроса к несуществующему эндпоинту /token/ws. Запрос отменен.');
+      // Создаем ошибку для отмены запроса
+      const error = new Error('Запрос к несуществующему эндпоинту /token/ws отменен');
+      return Promise.reject(error);
+    }
+    
+    // Ensure authorization token is included with every request if it exists
+    const token = localStorage.getItem('accessToken');
+    if (token && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+      
+      // Only log token application if it wasn't already set
+      if (config.url && !config.url.includes('/token') && !config.url.includes('/auth/google')) {
+        console.log(`🔐 Applied auth token from localStorage to request: ${config.method} ${config.url}`);
+      }
+    }
+    
     // Полноценное логирование запроса
     const logLevel = config.url.includes('csrf-token') || config.url.includes('change-password') 
       ? 'info' // Важные запросы логируем с уровнем info
@@ -63,6 +82,40 @@ api.interceptors.response.use(
     if (error.response) {
       console.error(`Статус ошибки: ${error.response.status}`);
       
+      // Обработка 401 Unauthorized - проверяем токен и пытаемся восстановить сессию
+      if (error.response.status === 401 && 
+          !error.config.url.includes('/token') && 
+          !error.config.url.includes('/auth/google')) {
+        
+        // Проверяем наличие токена в localStorage
+        const token = localStorage.getItem('accessToken');
+        
+        // Если токен есть, но запрос вернул 401, значит токен истек или недействителен
+        if (token) {
+          console.warn('🔑 Обнаружен 401 ответ с существующим токеном в localStorage. Пробуем переустановить токен...');
+          
+          // Пытаемся переустановить токен
+          const success = setAuthToken(token);
+          
+          if (success) {
+            console.log('🔄 Токен переустановлен. Повторяем запрос...');
+            
+            // Если токен успешно установлен, повторяем запрос (без рекурсии)
+            // Обновляем конфигурацию с новым токеном
+            error.config.headers['Authorization'] = `Bearer ${token}`;
+            
+            // Если запрос не помечен как повторный, выполняем его снова
+            if (!error.config._isRetry) {
+              // Устанавливаем флаг, что это повторный запрос
+              error.config._isRetry = true;
+              return axios(error.config);
+            }
+          } else {
+            console.error('🛑 Не удалось переустановить токен');
+          }
+        }
+      }
+      
       // Более подробный вывод для ошибок смены пароля
       if (error.config.url.includes('change-password')) {
         console.error('Детальная информация об ошибке смены пароля:');
@@ -90,11 +143,39 @@ api.interceptors.response.use(
 // Будет использоваться после логина
 export const setAuthToken = (token) => {
   if (token) {
+    // Ensure the token is properly formatted and valid
+    if (typeof token !== 'string' || token.trim() === '') {
+      console.error('🛑 Invalid auth token provided:', token);
+      return false;
+    }
+    
+    // Set the token in axios defaults
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    console.info('🔑 Auth token set in API headers');
+    
+    // Also explicitly set it for each method to ensure it propagates
+    api.defaults.headers.get['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.post['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.put['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.delete['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.patch['Authorization'] = `Bearer ${token}`;
+    
+    console.info('🔑 Auth token set in API headers', { token: token.substring(0, 10) + '...' });
+    
+    // Verify token is set correctly
+    console.info('🔍 Authorization header after setting:', api.defaults.headers.common['Authorization']);
+    
+    return true;
   } else {
+    // Remove token from all headers
     delete api.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.get['Authorization'];
+    delete api.defaults.headers.post['Authorization'];
+    delete api.defaults.headers.put['Authorization'];
+    delete api.defaults.headers.delete['Authorization'];
+    delete api.defaults.headers.patch['Authorization'];
+    
     console.info('🔑 Auth token removed from API headers');
+    return false;
   }
 };
 
@@ -330,6 +411,85 @@ api.getDistricts = async () => {
       "Яккасарайский район",
       "Яшнабадский район"
     ];
+  }
+};
+
+// Функция для получения валидного токена для WebSocket соединений
+export const getValidTokenForWS = () => {
+  // Заглушка: просто возвращаем токен из localStorage без запросов к серверу
+  const token = localStorage.getItem('accessToken');
+  return Promise.resolve(token);
+};
+
+// Функции для работы с консультациями
+export const consultationsApi = {
+  // Получение списка консультаций
+  getConsultations: async (filters = {}, page = 1, size = 10) => {
+    try {
+      const params = { page, size, ...filters };
+      const response = await api.get('/api/consultations', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при получении списка консультаций:', error);
+      throw error;
+    }
+  },
+
+  // Получение детальной информации о консультации
+  getConsultationById: async (consultationId) => {
+    try {
+      const response = await api.get(`/api/consultations/${consultationId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Ошибка при получении консультации с ID ${consultationId}:`, error);
+      throw error;
+    }
+  },
+  
+  // Получение всех сообщений консультации
+  getConsultationMessages: async (consultationId) => {
+    try {
+      const response = await api.get(`/api/consultations/${consultationId}/messages`);
+      return response.data;
+    } catch (error) {
+      console.error(`Ошибка при получении сообщений консультации ${consultationId}:`, error);
+      throw error;
+    }
+  },
+  
+  // Получение только новых сообщений после указанного времени
+  getConsultationMessagesSince: async (consultationId, timestamp) => {
+    try {
+      const params = { since: timestamp };
+      const response = await api.get(`/api/consultations/${consultationId}/messages`, { params });
+      return response.data;
+    } catch (error) {
+      console.error(`Ошибка при получении новых сообщений консультации ${consultationId}:`, error);
+      throw error;
+    }
+  },
+  
+  // Завершение консультации через API (запасной метод)
+  completeConsultation: async (consultationId) => {
+    try {
+      console.log(`Завершение консультации ${consultationId} через REST API`);
+      const response = await api.post(`/api/consultations/${consultationId}/complete`, {
+        status: 'completed'
+      });
+      return response.data;
+    } catch (error) {
+      // Пробуем альтернативный метод, если у бэкенда нет /complete эндпоинта
+      console.warn('Ошибка при завершении через POST, пробуем PUT запрос');
+      try {
+        const putResponse = await api.put(`/api/consultations/${consultationId}`, {
+          status: 'completed'
+        });
+        return putResponse.data;
+      } catch (secondError) {
+        console.error('Обе попытки завершения консультации через API не удались');
+        throw secondError;
+      }
+    }
   }
 };
 

@@ -13,13 +13,16 @@ import {
   DropdownMenu, 
   DropdownItem, 
   Avatar,
-  Button
+  Button,
+  Badge
 } from '@nextui-org/react';
 import useAuthStore from '../stores/authStore';
+import useChatStore from '../stores/chatStore';
 import api from '../api';
 
 function Header() {
   const { isAuthenticated, user, logout } = useAuthStore();
+  const { totalUnread, fetchUnreadCounts } = useChatStore();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
@@ -52,12 +55,19 @@ function Header() {
     };
   }, []);
   
-  // При изменении пользователя или каждую минуту проверяем уведомления
+  // При изменении пользователя или каждую минуту проверяем уведомления и непрочитанные сообщения
   useEffect(() => {
     if (user) {
       fetchNotifications();
-      const interval = setInterval(fetchNotifications, 60000);
-      return () => clearInterval(interval);
+      fetchUnreadCounts();
+      
+      const notificationInterval = setInterval(fetchNotifications, 60000);
+      const chatInterval = setInterval(fetchUnreadCounts, 30000); // Check for new messages more frequently
+      
+      return () => {
+        clearInterval(notificationInterval);
+        clearInterval(chatInterval);
+      };
     }
   }, [user]);
   
@@ -184,10 +194,12 @@ function Header() {
             
             {user?.role !== 'admin' && (
               <NavbarItem>
-                <Link to="/history" className="text-gray-700 hover:text-primary transition-colors relative group">
-                  История
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></span>
-                </Link>
+                <Badge content={totalUnread > 0 ? totalUnread : null} color="danger" shape="circle" size="sm">
+                  <Link to="/history" className="text-gray-700 hover:text-primary transition-colors relative group">
+                    История
+                    <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></span>
+                  </Link>
+                </Badge>
               </NavbarItem>
             )}
           </>
@@ -343,14 +355,16 @@ function Header() {
             
             {user?.role !== 'admin' && (
               <NavbarMenuItem>
-                <Link to="/history" className="w-full py-2 text-gray-700 hover:text-primary transition-colors">
-                  <div className="flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                <div className="flex items-center gap-2">
+                  <Link to="/history" className="w-full text-gray-700 hover:text-primary text-lg font-medium">
                     История
-                  </div>
-                </Link>
+                  </Link>
+                  {totalUnread > 0 && (
+                    <span className="px-2 py-1 bg-red-500 text-white text-xs rounded-full">
+                      {totalUnread}
+                    </span>
+                  )}
+                </div>
               </NavbarMenuItem>
             )}
             
